@@ -7,8 +7,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
 <script>
 /* ── Supabase REST + Realtime (no SDK, pure fetch + WebSocket) ── */
-const SB_URL='https://icgstmzwyyikdmqqdinn.supabase.co';
-const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljZ3N0bXp3eXlpa2RtcXFkaW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI2NDIwNjEsImV4cCI6MjA1ODIxODA2MX0.ZelUh6BO4a0wXSjlRm1xt0UYpBl7i5b8_CJD4Y8bv_0';
+const SB_URL='https://hhcubvixldieuwdeqnwc.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoY3Vidml4bGRpZXV3ZGVxbndjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1NjcyNDYsImV4cCI6MjA5MTE0MzI0Nn0.zkWxfm0FugSEL9zW6pwDFWPqmRJ3ystOZfU8yRL2lPo';
 const HDR={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'return=representation'};
 
 /* REST helpers */
@@ -50,7 +50,7 @@ function realtimeConnect(roomId,onMsg){
   return new Promise((resolve,reject)=>{
     if(_ws){try{_ws.close();}catch(e){}}
     _wsListeners=[];
-    const wsUrl='wss://icgstmzwyyikdmqqdinn.supabase.co/realtime/v1/websocket?apikey='+SB_KEY+'&vsn=1.0.0';
+    const wsUrl='wss://hhcubvixldieuwdeqnwc.supabase.co/realtime/v1/websocket?apikey='+SB_KEY+'&vsn=1.0.0';
     _ws=new WebSocket(wsUrl);
     const chan='hc:'+roomId;
     _wsChan=chan;
