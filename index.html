@@ -636,6 +636,7 @@ function handleEvent(ev){
   switch(ev.type){
     case 'lobby_update':     onLobbyUpdate(ev);        break;
     case 'oe_choose':        onOppOEChoose(ev);        break;
+    case 'dice_roll':        onDiceRoll(ev);           break;
     case 'guardian':         onOppGuardian(ev);        break;
     case 'blanks_done':      onOppBlanksDone(ev);      break;
     case 'play_card':        onOppPlayCard(ev);        break;
@@ -789,6 +790,10 @@ function onLobbyUpdate(ev){
 
 function startOddEven(){
   clearInterval(_lobbyPoll);
+  _oppOEChoice=null;
+  _diceValue=null;
+  clearInterval(_oePoller);
+  clearInterval(_dicePoller);
   G.deck=makeDeck();
   document.getElementById('oe-btns').style.display='flex';
   document.getElementById('oe-my-choice').style.display='none';
@@ -817,6 +822,8 @@ function lcgRand(seed){let s=seed;return()=>{s=(1664525*s+1013904223)%4294967296
    ODD/EVEN
 ══════════════════════════════════════ */
 let _oppOEChoice=null;
+let _diceValue=null;
+
 function chooseOE(v){
   G.chosenOE=v;
   document.getElementById('btn-odd').classList.toggle('sel',v==='odd');
@@ -824,24 +831,79 @@ function chooseOE(v){
   document.getElementById('oe-btns').style.display='none';
   document.getElementById('oe-my-choice').style.display='block';
   document.getElementById('oe-my-choice').textContent='你選擇了「'+(v==='odd'?'單':'雙')+'」，等待對方...';
+  /* 同時廣播並存入 game_state，確保對方收得到 */
   sendEvent('oe_choose',{choice:v});
-  if(_oppOEChoice)rollDiceNow();
+  dbUpsert('hc_game_state',{room_id:G.roomId,state:{oe:{[G.myPlayer]:v,dice:null}},updated_at:new Date().toISOString()}).catch(()=>{});
+  if(_oppOEChoice)_startDice();
+  /* 輪詢備援：每2秒檢查對方是否已選 */
+  _oePoller=setInterval(_pollOE,2000);
+}
+
+let _oePoller=null;
+async function _pollOE(){
+  if(_oppOEChoice){clearInterval(_oePoller);return;}
+  try{
+    const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
+    if(!row?.state?.oe)return;
+    const oppSlot=G.myPlayer==='A'?'B':'A';
+    const oppChoice=row.state.oe[oppSlot];
+    if(oppChoice&&!_oppOEChoice){
+      _oppOEChoice=oppChoice;
+      clearInterval(_oePoller);
+      showToast('對方已選擇，準備擲骰子！');
+      _startDice();
+    }
+  }catch(e){}
 }
 
 function onOppOEChoose(ev){
+  if(_oppOEChoice)return;
   _oppOEChoice=ev.choice;
+  clearInterval(_oePoller);
   showToast('對方已選擇，準備擲骰子！');
-  if(G.chosenOE)rollDiceNow();
+  if(G.chosenOE)_startDice();
 }
 
-function rollDiceNow(){
+function _startDice(){
+  if(_diceValue!==null)return; /* already started */
+  /* Player A 決定骰子並廣播，Player B 等待接收 */
+  if(G.myPlayer==='A'){
+    _diceValue=Math.floor(Math.random()*6)+1;
+    sendEvent('dice_roll',{n:_diceValue});
+    dbUpsert('hc_game_state',{room_id:G.roomId,state:{oe:{A:G.chosenOE,B:_oppOEChoice},dice:_diceValue},updated_at:new Date().toISOString()}).catch(()=>{});
+    rollDiceNow(_diceValue);
+  } else {
+    /* Player B：等待A廣播，同時輪詢備援 */
+    showToast('等待骰子結果...');
+    document.getElementById('dice-section').style.display='block';
+    _dicePoller=setInterval(_pollDice,1500);
+  }
+}
+
+let _dicePoller=null;
+async function _pollDice(){
+  try{
+    const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
+    if(row?.state?.dice&&_diceValue===null){
+      _diceValue=row.state.dice;
+      clearInterval(_dicePoller);
+      rollDiceNow(_diceValue);
+    }
+  }catch(e){}
+}
+
+function onDiceRoll(ev){
+  if(_diceValue!==null)return;
+  _diceValue=ev.n;
+  clearInterval(_dicePoller);
+  rollDiceNow(_diceValue);
+}
+
+function rollDiceNow(n){
   document.getElementById('dice-section').style.display='block';
   const d=document.getElementById('dice3d');
   d.classList.remove('rolling');void d.offsetWidth;d.classList.add('rolling');
   musicStart('dice');
-  // deterministic: player A always rolls
-  const seed=Date.now()%99999;
-  const n=(seed%6)+1;
   setTimeout(()=>{
     const isOdd=n%2===1;
     G.isFirst=(G.chosenOE==='odd'&&isOdd)||(G.chosenOE==='even'&&!isOdd);
@@ -1335,7 +1397,9 @@ function launchConfetti(){
 function playAgain(){
   G.myGuardian=null;G.talentUsed=false;G.selectedCard=null;G.round=1;
   G.myVault=[];G.oppVault=[];G.chosenOE='';G.punishA='';G.punishB='';
-  _oppOEChoice=null;_oppGuardianDone=false;_oppBlanksDone=false;_oppRoundDone=false;_oppPunish=null;
+  _oppOEChoice=null;_diceValue=null;
+  _oppGuardianDone=false;_oppBlanksDone=false;_oppRoundDone=false;_oppPunish=null;
+  clearInterval(_oePoller);clearInterval(_dicePoller);
   G.deck=makeDeck();
   startOddEven();
 }
