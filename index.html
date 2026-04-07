@@ -669,7 +669,21 @@ async function enterRoom(){
   try{
     /* 1. REST only — create room if not exists */
     let room=await dbGet('hc_rooms','id=eq.'+rid+'&select=id');
-    if(!room){ try{await dbInsert('hc_rooms',{id:rid,plays:0});}catch(e2){console.log('room exists ok');} }
+    if(!room){
+      try{await dbInsert('hc_rooms',{id:rid,plays:0});}catch(e2){console.log('room exists ok');}
+      /* 新房間：清除任何殘留資料 */
+      await fetch(SB_URL+'/rest/v1/hc_lobby?room_id=eq.'+rid,{method:'DELETE',headers:HDR}).catch(()=>{});
+      await fetch(SB_URL+'/rest/v1/hc_game_state?room_id=eq.'+rid,{method:'DELETE',headers:HDR}).catch(()=>{});
+    } else {
+      /* 已存在房間：檢查是否有人在線，無人則清空 */
+      const lobbyRows=await dbSelect('hc_lobby','room_id=eq.'+rid+'&select=slot,updated_at').catch(()=>[]);
+      const now=Date.now();
+      const hasActive=lobbyRows.some(r=>(now-new Date(r.updated_at).getTime())<300000); /* 5分鐘內有活動 */
+      if(!hasActive){
+        await fetch(SB_URL+'/rest/v1/hc_lobby?room_id=eq.'+rid,{method:'DELETE',headers:HDR}).catch(()=>{});
+        await fetch(SB_URL+'/rest/v1/hc_game_state?room_id=eq.'+rid,{method:'DELETE',headers:HDR}).catch(()=>{});
+      }
+    }
     G.roomId=rid;
     /* 2. show lobby immediately */
     hideConnecting();
@@ -928,14 +942,38 @@ function selectGuardian(id){
   document.getElementById('gd-skill').textContent='天賦：'+G.myGuardian.skill;
   document.getElementById('gd-desc').textContent=G.myGuardian.desc;
 }
+let _guardianPoller=null;
 async function confirmGuardian(){
   document.getElementById('guardian-waiting').style.display='block';
   document.getElementById('btn-guardian').disabled=true;
-  await sendEvent('guardian',{guardian:G.myGuardian.id});
-  if(_oppGuardianDone)startDealPhase();
+  /* broadcast + write to DB */
+  sendEvent('guardian',{guardian:G.myGuardian.id});
+  await dbUpsert('hc_game_state',{
+    room_id:G.roomId,
+    state:{guardian:{[G.myPlayer]:G.myGuardian.id}},
+    updated_at:new Date().toISOString()
+  }).catch(()=>{});
+  if(_oppGuardianDone){ clearInterval(_guardianPoller); startDealPhase(); return; }
+  /* poll fallback */
+  _guardianPoller=setInterval(_pollGuardian,1500);
+}
+async function _pollGuardian(){
+  if(_oppGuardianDone){ clearInterval(_guardianPoller); return; }
+  try{
+    const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
+    const oppSlot=G.myPlayer==='A'?'B':'A';
+    if(row?.state?.guardian?.[oppSlot] && !_oppGuardianDone){
+      _oppGuardianDone=true;
+      clearInterval(_guardianPoller);
+      showToast(G.oppName+' 已選好守護神');
+      if(document.getElementById('guardian-waiting').style.display==='block')startDealPhase();
+    }
+  }catch(e){}
 }
 function onOppGuardian(ev){
+  if(_oppGuardianDone)return;
   _oppGuardianDone=true;
+  clearInterval(_guardianPoller);
   showToast(G.oppName+' 已選好守護神');
   if(document.getElementById('guardian-waiting').style.display==='block')startDealPhase();
 }
@@ -989,19 +1027,45 @@ function saveBlank(){
   document.getElementById('blank-status').textContent='已填寫 '+G.blankFilled+' / 2';
   if(G.blankFilled>=2)document.getElementById('btn-deal').disabled=false;
 }
+let _blanksPoller=null;
 async function submitBlankCards(){
   document.getElementById('deal-waiting').style.display='block';
   document.getElementById('btn-deal').disabled=true;
-  // share blank tasks with opponent
   const tasks=G.blankCards.map(c=>({suit:c.suit,val:c.val,task:c.task}));
-  await sendEvent('blanks_done',{tasks});
-  if(_oppBlanksDone)startBattle();
+  /* broadcast + write to DB */
+  sendEvent('blanks_done',{tasks});
+  await dbUpsert('hc_game_state',{
+    room_id:G.roomId,
+    state:{blanks:{[G.myPlayer]:tasks}},
+    updated_at:new Date().toISOString()
+  }).catch(()=>{});
+  if(_oppBlanksDone){ clearInterval(_blanksPoller); startBattle(); return; }
+  _blanksPoller=setInterval(_pollBlanks,1500);
+}
+async function _pollBlanks(){
+  if(_oppBlanksDone){ clearInterval(_blanksPoller); return; }
+  try{
+    const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
+    const oppSlot=G.myPlayer==='A'?'B':'A';
+    const oppTasks=row?.state?.blanks?.[oppSlot];
+    if(oppTasks&&!_oppBlanksDone){
+      _oppBlanksDone=true;
+      clearInterval(_blanksPoller);
+      oppTasks.forEach(t=>{
+        const card=G.deck.find(card=>card.suit===t.suit&&card.val===t.val);
+        if(card){card.task=t.task;card.customFilled=true;}
+      });
+      showToast(G.oppName+' 已填好任務卡');
+      if(document.getElementById('deal-waiting').style.display==='block')startBattle();
+    }
+  }catch(e){}
 }
 function onOppBlanksDone(ev){
+  if(_oppBlanksDone)return;
   _oppBlanksDone=true;
-  // apply opp blank tasks to our deck copy
+  clearInterval(_blanksPoller);
   ev.tasks.forEach(t=>{
-    const card=G.deck.find(c=>c.suit===t.suit&&c.val===t.val);
+    const card=G.deck.find(card=>card.suit===t.suit&&card.val===t.val);
     if(card){card.task=t.task;card.customFilled=true;}
   });
   showToast(G.oppName+' 已填好任務卡');
@@ -1384,6 +1448,7 @@ function playAgain(){
   G.myVault=[];G.oppVault=[];G.chosenOE='';G.punishA='';G.punishB='';
   _coinFlipped=false;clearInterval(_coinPoller);
   _oppGuardianDone=false;_oppBlanksDone=false;_oppRoundDone=false;_oppPunish=null;
+  clearInterval(_guardianPoller);clearInterval(_blanksPoller);
   G.deck=makeDeck();
   startOddEven();
 }
