@@ -345,24 +345,29 @@ html,body{height:100%;color:#4A0020;font-family:'Noto Sans TC',sans-serif;overfl
   <p class="logo">Heart<span> / </span>Cards</p>
   <div class="steps"><div class="step-d"></div><div class="step-d a"></div><div class="step-d"></div></div>
   <p class="ttl">決定先後手</p>
-  <p class="sub" id="oe-sub">選擇單或雙，擲骰子決定先後手</p>
-  <div id="oe-my-choice" style="display:none;width:100%;background:rgba(255,255,255,.15);border-radius:var(--r2);padding:.75rem;text-align:center;margin-bottom:1rem;font-size:14px;color:rgba(255,255,255,.85);">已選擇，等待對方...</div>
-  <div class="oe-row" id="oe-btns">
-    <button class="oe-btn" id="btn-odd" onclick="chooseOE('odd')">單<span class="oe-sub">奇數點數</span></button>
-    <button class="oe-btn" id="btn-even" onclick="chooseOE('even')">雙<span class="oe-sub">偶數點數</span></button>
-  </div>
-  <div id="dice-section" style="display:none;width:100%;text-align:center;">
-    <div class="dice-scene">
-      <div class="dice-3d" id="dice3d">
-        <div class="d-face f">1</div><div class="d-face b">6</div>
-        <div class="d-face l">3</div><div class="d-face r">4</div>
-        <div class="d-face t">2</div><div class="d-face bo">5</div>
+  <p class="sub" id="oe-sub">投擲硬幣，正面朝上者為先手</p>
+
+  <div id="coin-wrap" style="margin:1.5rem auto 1rem;width:160px;height:160px;perspective:600px;cursor:pointer;" onclick="flipCoin()">
+    <div id="coin-inner" style="width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform 1.2s cubic-bezier(.4,0,.2,1);">
+      <div id="coin-front" style="position:absolute;inset:0;border-radius:50%;background:rgba(255,255,255,.9);border:4px solid rgba(255,255,255,.6);display:flex;flex-direction:column;align-items:center;justify-content:center;backface-visibility:hidden;">
+        <div style="font-size:28px;margin-bottom:4px;">👑</div>
+        <div id="coin-name-a" style="font-size:13px;font-weight:700;color:#B5194A;text-align:center;padding:0 8px;"></div>
+        <div style="font-size:10px;color:#C2547A;margin-top:2px;">先手</div>
+      </div>
+      <div id="coin-back" style="position:absolute;inset:0;border-radius:50%;background:rgba(255,200,220,.85);border:4px solid rgba(255,255,255,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;backface-visibility:hidden;transform:rotateY(180deg);">
+        <div style="font-size:28px;margin-bottom:4px;">💕</div>
+        <div id="coin-name-b" style="font-size:13px;font-weight:700;color:#B5194A;text-align:center;padding:0 8px;"></div>
+        <div style="font-size:10px;color:#C2547A;margin-top:2px;">後手</div>
       </div>
     </div>
-    <div class="dice-result-box" id="dice-result" style="display:none;">
-      <div class="dice-num" id="dice-num">-</div>
-      <div class="dice-lbl" id="dice-lbl">-</div>
-    </div>
+  </div>
+
+  <p id="coin-hint" style="font-size:13px;color:rgba(255,255,255,.75);text-align:center;margin-bottom:1.5rem;">點擊硬幣投擲</p>
+
+  <div id="coin-result-box" style="display:none;width:100%;background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.4);border-radius:var(--r);padding:1.25rem;text-align:center;backdrop-filter:blur(6px);animation:popIn .4s cubic-bezier(.34,1.56,.64,1);">
+    <div id="coin-result-icon" style="font-size:40px;margin-bottom:.5rem;"></div>
+    <div id="coin-result-ttl" style="font-size:20px;font-weight:700;color:#fff;margin-bottom:.25rem;font-family:'Noto Serif TC',serif;"></div>
+    <div id="coin-result-sub" style="font-size:13px;color:rgba(255,255,255,.8);"></div>
   </div>
 </div>
 
@@ -635,8 +640,7 @@ function handleEvent(ev){
   if(ev.from===G.myPlayer)return;
   switch(ev.type){
     case 'lobby_update':     onLobbyUpdate(ev);        break;
-    case 'oe_choose':        onOppOEChoose(ev);        break;
-    case 'dice_roll':        onDiceRoll(ev);           break;
+    case 'coin_result':      onCoinResult(ev);         break;
     case 'guardian':         onOppGuardian(ev);        break;
     case 'blanks_done':      onOppBlanksDone(ev);      break;
     case 'play_card':        onOppPlayCard(ev);        break;
@@ -790,16 +794,11 @@ function onLobbyUpdate(ev){
 
 function startOddEven(){
   clearInterval(_lobbyPoll);
-  _oppOEChoice=null;
-  _diceValue=null;
-  clearInterval(_oePoller);
-  clearInterval(_dicePoller);
+  _coinFlipped=false;
+  clearInterval(_coinPoller);
   G.deck=makeDeck();
-  document.getElementById('oe-btns').style.display='flex';
-  document.getElementById('oe-my-choice').style.display='none';
-  document.getElementById('dice-section').style.display='none';
-  document.getElementById('dice-result').style.display='none';
   goScreen('s-odd-even');
+  startOEScreen();
   showToast('雙方都已就緒！決定先後手');
 }
 
@@ -819,100 +818,86 @@ function makeDeck(seed){
 function lcgRand(seed){let s=seed;return()=>{s=(1664525*s+1013904223)%4294967296;return s/4294967296;};}
 
 /* ══════════════════════════════════════
-   ODD/EVEN
+   COIN FLIP
 ══════════════════════════════════════ */
-let _oppOEChoice=null;
-let _diceValue=null;
+let _coinFlipped=false;
+let _coinPoller=null;
 
-function chooseOE(v){
-  G.chosenOE=v;
-  document.getElementById('btn-odd').classList.toggle('sel',v==='odd');
-  document.getElementById('btn-even').classList.toggle('sel',v==='even');
-  document.getElementById('oe-btns').style.display='none';
-  document.getElementById('oe-my-choice').style.display='block';
-  document.getElementById('oe-my-choice').textContent='你選擇了「'+(v==='odd'?'單':'雙')+'」，等待對方...';
-  /* 同時廣播並存入 game_state，確保對方收得到 */
-  sendEvent('oe_choose',{choice:v});
-  dbUpsert('hc_game_state',{room_id:G.roomId,state:{oe:{[G.myPlayer]:v,dice:null}},updated_at:new Date().toISOString()}).catch(()=>{});
-  if(_oppOEChoice)_startDice();
-  /* 輪詢備援：每2秒檢查對方是否已選 */
-  _oePoller=setInterval(_pollOE,2000);
-}
-
-let _oePoller=null;
-async function _pollOE(){
-  if(_oppOEChoice){clearInterval(_oePoller);return;}
-  try{
-    const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
-    if(!row?.state?.oe)return;
-    const oppSlot=G.myPlayer==='A'?'B':'A';
-    const oppChoice=row.state.oe[oppSlot];
-    if(oppChoice&&!_oppOEChoice){
-      _oppOEChoice=oppChoice;
-      clearInterval(_oePoller);
-      showToast('對方已選擇，準備擲骰子！');
-      _startDice();
-    }
-  }catch(e){}
-}
-
-function onOppOEChoose(ev){
-  if(_oppOEChoice)return;
-  _oppOEChoice=ev.choice;
-  clearInterval(_oePoller);
-  showToast('對方已選擇，準備擲骰子！');
-  if(G.chosenOE)_startDice();
-}
-
-function _startDice(){
-  if(_diceValue!==null)return; /* already started */
-  /* Player A 決定骰子並廣播，Player B 等待接收 */
-  if(G.myPlayer==='A'){
-    _diceValue=Math.floor(Math.random()*6)+1;
-    sendEvent('dice_roll',{n:_diceValue});
-    dbUpsert('hc_game_state',{room_id:G.roomId,state:{oe:{A:G.chosenOE,B:_oppOEChoice},dice:_diceValue},updated_at:new Date().toISOString()}).catch(()=>{});
-    rollDiceNow(_diceValue);
-  } else {
-    /* Player B：等待A廣播，同時輪詢備援 */
-    showToast('等待骰子結果...');
-    document.getElementById('dice-section').style.display='block';
-    _dicePoller=setInterval(_pollDice,1500);
+function startOEScreen(){
+  /* fill coin face names */
+  const nameA=G.myPlayer==='A'?G.myName:G.oppName;
+  const nameB=G.myPlayer==='A'?G.oppName:G.myName;
+  document.getElementById('coin-name-a').textContent=nameA||'玩家A';
+  document.getElementById('coin-name-b').textContent=nameB||'玩家B';
+  document.getElementById('coin-hint').textContent=
+    G.myPlayer==='A'?'點擊硬幣投擲':'等待對方投擲硬幣...';
+  document.getElementById('coin-result-box').style.display='none';
+  document.getElementById('coin-inner').style.transform='';
+  /* Player B polls for result */
+  if(G.myPlayer==='B'){
+    _coinPoller=setInterval(_pollCoin,1500);
   }
 }
 
-let _dicePoller=null;
-async function _pollDice(){
+function flipCoin(){
+  if(_coinFlipped)return;
+  if(G.myPlayer!=='A'){showToast('等待對方投擲...');return;}
+  _coinFlipped=true;
+  document.getElementById('coin-hint').textContent='投擲中...';
+  musicStart('dice');
+  /* random: 0=A先手, 1=B先手 */
+  const result=Math.random()<0.5?'A':'B';
+  /* save to DB immediately so B can poll */
+  dbUpsert('hc_game_state',{
+    room_id:G.roomId,
+    state:{coin:result},
+    updated_at:new Date().toISOString()
+  }).catch(()=>{});
+  sendEvent('coin_result',{result});
+  _animateCoin(result);
+}
+
+function _animateCoin(result){
+  const coin=document.getElementById('coin-inner');
+  /* spin 5 times + land on correct face */
+  const extra=result==='A'?0:180; /* A=正面, B=反面 */
+  coin.style.transition='transform 1.6s cubic-bezier(.4,0,.2,1)';
+  coin.style.transform='rotateY('+(1800+extra)+'deg)';
+  setTimeout(()=>_showCoinResult(result),1800);
+}
+
+function _showCoinResult(result){
+  const iFirst=result===G.myPlayer;
+  G.isFirst=iFirst;
+  const winner=result==='A'?
+    (G.myPlayer==='A'?G.myName:G.oppName):
+    (G.myPlayer==='B'?G.myName:G.oppName);
+  document.getElementById('coin-result-box').style.display='block';
+  document.getElementById('coin-result-icon').textContent=iFirst?'🎉':'💪';
+  document.getElementById('coin-result-ttl').textContent=winner+' 是先手！';
+  document.getElementById('coin-result-sub').textContent=iFirst?'你先出牌，掌握主動！':'你是後手，伺機反擊！';
+  document.getElementById('coin-hint').textContent='';
+  showToast(iFirst?'你是先手！':'你是後手');
+  setTimeout(()=>{buildGuardian();goScreen('s-guardian');},2200);
+}
+
+function onCoinResult(ev){
+  if(_coinFlipped)return;
+  _coinFlipped=true;
+  clearInterval(_coinPoller);
+  _animateCoin(ev.result);
+}
+
+async function _pollCoin(){
+  if(_coinFlipped){clearInterval(_coinPoller);return;}
   try{
     const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
-    if(row?.state?.dice&&_diceValue===null){
-      _diceValue=row.state.dice;
-      clearInterval(_dicePoller);
-      rollDiceNow(_diceValue);
+    if(row?.state?.coin&&!_coinFlipped){
+      _coinFlipped=true;
+      clearInterval(_coinPoller);
+      _animateCoin(row.state.coin);
     }
   }catch(e){}
-}
-
-function onDiceRoll(ev){
-  if(_diceValue!==null)return;
-  _diceValue=ev.n;
-  clearInterval(_dicePoller);
-  rollDiceNow(_diceValue);
-}
-
-function rollDiceNow(n){
-  document.getElementById('dice-section').style.display='block';
-  const d=document.getElementById('dice3d');
-  d.classList.remove('rolling');void d.offsetWidth;d.classList.add('rolling');
-  musicStart('dice');
-  setTimeout(()=>{
-    const isOdd=n%2===1;
-    G.isFirst=(G.chosenOE==='odd'&&isOdd)||(G.chosenOE==='even'&&!isOdd);
-    document.getElementById('dice-num').textContent=n;
-    document.getElementById('dice-lbl').textContent=(isOdd?'單數':'雙數')+' — '+(G.isFirst?G.myName+' 是先手！':G.oppName+' 是先手');
-    document.getElementById('dice-result').style.display='block';
-    showToast(G.isFirst?'你是先手！':'你是後手');
-    setTimeout(()=>{buildGuardian();goScreen('s-guardian');},2000);
-  },1900);
 }
 
 /* ══════════════════════════════════════
@@ -1397,9 +1382,8 @@ function launchConfetti(){
 function playAgain(){
   G.myGuardian=null;G.talentUsed=false;G.selectedCard=null;G.round=1;
   G.myVault=[];G.oppVault=[];G.chosenOE='';G.punishA='';G.punishB='';
-  _oppOEChoice=null;_diceValue=null;
+  _coinFlipped=false;clearInterval(_coinPoller);
   _oppGuardianDone=false;_oppBlanksDone=false;_oppRoundDone=false;_oppPunish=null;
-  clearInterval(_oePoller);clearInterval(_dicePoller);
   G.deck=makeDeck();
   startOddEven();
 }
