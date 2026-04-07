@@ -39,6 +39,19 @@ async function dbUpsert(table,body){
   if(!r.ok)throw new Error(j?.message||r.statusText);
   return Array.isArray(j)?j[0]:j;
 }
+/* Merge patch into game_state without overwriting other keys */
+async function mergeState(patch){
+  const r=await fetch(SB_URL+'/rest/v1/rpc/merge_game_state',{
+    method:'POST',headers:HDR,
+    body:JSON.stringify({p_room_id:G.roomId,p_patch:patch})
+  });
+  if(!r.ok){const j=await r.json();throw new Error(j?.message||r.statusText);}
+}
+/* Read current game state */
+async function readState(){
+  const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
+  return row?.state||{};
+}
 async function dbUpdate(table,filters,body){
   const r=await fetch(SB_URL+'/rest/v1/'+table+'?'+filters,{method:'PATCH',headers:HDR,body:JSON.stringify(body)});
   if(!r.ok){const j=await r.json();throw new Error(j?.message||r.statusText);}
@@ -862,11 +875,7 @@ function flipCoin(){
   /* random: 0=A先手, 1=B先手 */
   const result=Math.random()<0.5?'A':'B';
   /* save to DB immediately so B can poll */
-  dbUpsert('hc_game_state',{
-    room_id:G.roomId,
-    state:{coin:result},
-    updated_at:new Date().toISOString()
-  }).catch(()=>{});
+  mergeState({coin:result}).catch(()=>{});
   sendEvent('coin_result',{result});
   _animateCoin(result);
 }
@@ -905,11 +914,10 @@ function onCoinResult(ev){
 async function _pollCoin(){
   if(_coinFlipped){clearInterval(_coinPoller);return;}
   try{
-    const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
-    if(row?.state?.coin&&!_coinFlipped){
-      _coinFlipped=true;
-      clearInterval(_coinPoller);
-      _animateCoin(row.state.coin);
+    const st=await readState();
+    if(st.coin&&!_coinFlipped){
+      _coinFlipped=true;clearInterval(_coinPoller);
+      _animateCoin(st.coin);
     }
   }catch(e){}
 }
@@ -948,11 +956,7 @@ async function confirmGuardian(){
   document.getElementById('btn-guardian').disabled=true;
   /* broadcast + write to DB */
   sendEvent('guardian',{guardian:G.myGuardian.id});
-  await dbUpsert('hc_game_state',{
-    room_id:G.roomId,
-    state:{guardian:{[G.myPlayer]:G.myGuardian.id}},
-    updated_at:new Date().toISOString()
-  }).catch(()=>{});
+  await mergeState({guardian:{[G.myPlayer]:G.myGuardian.id}}).catch(()=>{});
   if(_oppGuardianDone){ clearInterval(_guardianPoller); startDealPhase(); return; }
   /* poll fallback */
   _guardianPoller=setInterval(_pollGuardian,1500);
@@ -960,11 +964,10 @@ async function confirmGuardian(){
 async function _pollGuardian(){
   if(_oppGuardianDone){ clearInterval(_guardianPoller); return; }
   try{
-    const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
+    const st=await readState();
     const oppSlot=G.myPlayer==='A'?'B':'A';
-    if(row?.state?.guardian?.[oppSlot] && !_oppGuardianDone){
-      _oppGuardianDone=true;
-      clearInterval(_guardianPoller);
+    if(st.guardian?.[oppSlot]&&!_oppGuardianDone){
+      _oppGuardianDone=true;clearInterval(_guardianPoller);
       showToast(G.oppName+' 已選好守護神');
       if(document.getElementById('guardian-waiting').style.display==='block')startDealPhase();
     }
@@ -1034,23 +1037,18 @@ async function submitBlankCards(){
   const tasks=G.blankCards.map(c=>({suit:c.suit,val:c.val,task:c.task}));
   /* broadcast + write to DB */
   sendEvent('blanks_done',{tasks});
-  await dbUpsert('hc_game_state',{
-    room_id:G.roomId,
-    state:{blanks:{[G.myPlayer]:tasks}},
-    updated_at:new Date().toISOString()
-  }).catch(()=>{});
+  await mergeState({blanks:{[G.myPlayer]:tasks}}).catch(()=>{});
   if(_oppBlanksDone){ clearInterval(_blanksPoller); startBattle(); return; }
   _blanksPoller=setInterval(_pollBlanks,1500);
 }
 async function _pollBlanks(){
   if(_oppBlanksDone){ clearInterval(_blanksPoller); return; }
   try{
-    const row=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
+    const st=await readState();
     const oppSlot=G.myPlayer==='A'?'B':'A';
-    const oppTasks=row?.state?.blanks?.[oppSlot];
+    const oppTasks=st.blanks?.[oppSlot];
     if(oppTasks&&!_oppBlanksDone){
-      _oppBlanksDone=true;
-      clearInterval(_blanksPoller);
+      _oppBlanksDone=true;clearInterval(_blanksPoller);
       oppTasks.forEach(t=>{
         const card=G.deck.find(card=>card.suit===t.suit&&card.val===t.val);
         if(card){card.task=t.task;card.customFilled=true;}
@@ -1083,9 +1081,38 @@ function startBattle(){
   MUS.sfxDeal();
   renderBattleScreen();
   goScreen('s-hand');
+  startBattlePoll();
   showToast('對戰開始！共5回合');
 }
 
+/* Poll for opponent's action during battle */
+let _battlePoller=null;
+function startBattlePoll(){
+  clearInterval(_battlePoller);
+  _battlePoller=setInterval(_pollBattle,2000);
+}
+async function _pollBattle(){
+  try{
+    const st=await readState();
+    const oppSlot=G.myPlayer==='A'?'B':'A';
+    /* Check if opponent played a card we haven't seen */
+    if(st.play?.slot===oppSlot && st.play?.round===G.round){
+      const cur=document.getElementById('s-hand');
+      if(cur&&cur.classList.contains('active')){
+        clearInterval(_battlePoller);
+        onOppPlayCard({card:st.play.card});
+      }
+    }
+    /* Check challenge result we haven't seen */
+    if(st.challenge?.slot===oppSlot && st.challenge?.round===G.round){
+      const cur=document.getElementById('s-wait-challenge');
+      if(cur&&cur.classList.contains('active')){
+        clearInterval(_battlePoller);
+        onChallengeResult({success:st.challenge.success,round:st.challenge.round});
+      }
+    }
+  }catch(e){}
+}
 function renderBattleScreen(){
   const g=G.myGuardian||GUARDIANS[0];
   document.getElementById('round-label').textContent=G.round+'/5';
@@ -1175,7 +1202,8 @@ async function playCard(){
   const cardEls=document.querySelectorAll('#hand-cards .card');
   if(cardEls[G.selectedCard])cardEls[G.selectedCard].classList.add('playing');
   MUS.sfxSwipeUp();
-  await sendEvent('play_card',{card:{suit:card.suit,val:card.val,task:card.task},round:G.round});
+  sendEvent('play_card',{card:{suit:card.suit,val:card.val,task:card.task},round:G.round});
+  mergeState({play:{slot:G.myPlayer,round:G.round,card:{suit:card.suit,val:card.val,task:card.task}}}).catch(()=>{});
   // show waiting for result
   setTimeout(()=>{
     const isLateRound=G.round>=4;
@@ -1186,6 +1214,7 @@ async function playCard(){
     document.getElementById('wc-title').textContent=card.task[0];
     document.getElementById('wc-content').textContent=card.task[1];
     goScreen('s-wait-challenge');
+    startBattlePoll();
   },400);
 }
 
@@ -1216,14 +1245,16 @@ function onOppPlayCard(ev){
 async function resolveChallenge(success){
   if(success){
     MUS.sfxSuccess();
-    await sendEvent('challenge_result',{success:true,round:G.round});
+    sendEvent('challenge_result',{success:true,round:G.round});
+    mergeState({challenge:{slot:G.myPlayer,round:G.round,success:true}}).catch(()=>{});
     showToast('挑戰成功！');
   } else {
     MUS.sfxFail();
-    await sendEvent('challenge_result',{success:false,round:G.round});
+    sendEvent('challenge_result',{success:false,round:G.round});
+    mergeState({challenge:{slot:G.myPlayer,round:G.round,success:false}}).catch(()=>{});
     showToast('挑戰失敗...');
   }
-  goScreen('s-hand');updateTurnBanner();renderHand();
+  goScreen('s-hand');updateTurnBanner();renderHand();startBattlePoll();
 }
 
 async function onChallengeResult(ev){
@@ -1284,6 +1315,7 @@ function onOppVaultPick(ev){
 let _oppRoundDone=false;
 async function advanceRound(){
   renderVaults();
+  clearInterval(_battlePoller);
   if(G.myVault.length>=5||G.round>=5){
     await sendEvent('round_done',{vaultCount:G.myVault.length});
     G.selectedCard=null;
