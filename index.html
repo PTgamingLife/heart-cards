@@ -226,11 +226,15 @@ html,body{height:100%;color:#4A0020;font-family:'Noto Sans TC',sans-serif;overfl
   <div class="steps"><div class="step-d a"></div><div class="step-d"></div><div class="step-d"></div></div>
   <p class="ttl">建立或加入房間</p>
   <p class="sub">輸入房間號與密碼進入遊戲<br>房間不存在時自動建立</p>
-  <input class="inp" id="room-id" placeholder="房間號（4-8碼英數字）" maxlength="8" oninput="this.value=this.value.toUpperCase();checkLogin()">
-  <input class="inp" id="room-pw" type="password" placeholder="房間密碼（至少4碼）" oninput="checkLogin()">
+  <input class="inp" id="room-id" placeholder="房間號（4-8碼英數字）" maxlength="8"
+    oninput="this.value=this.value.toUpperCase();checkLogin()"
+    onchange="this.value=this.value.toUpperCase();checkLogin()">
+  <input class="inp" id="room-pw" type="password" placeholder="房間密碼（至少4碼）"
+    oninput="checkLogin()" onchange="checkLogin()">
   <p class="err" id="login-err" style="display:none;"></p>
-  <input class="inp" id="my-name" placeholder="你的暱稱" maxlength="10" oninput="checkLogin()">
-  <button class="btn pri" id="btn-login" onclick="doLogin(event)" disabled>進入房間</button>
+  <input class="inp" id="my-name" placeholder="你的暱稱" maxlength="10"
+    oninput="checkLogin()" onchange="checkLogin()">
+  <button class="btn pri" id="btn-login" onclick="doLogin(event)">進入房間</button>
   <div class="divider"><div class="div-line"></div><div class="div-txt">房間排行榜</div><div class="div-line"></div></div>
   <button class="btn ghost btn-sm" style="width:auto;" onclick="showLeaderboard()">查看排行榜</button>
 </div>
@@ -583,33 +587,30 @@ function handleEvent(ev){
    LOGIN & ROOM
 ══════════════════════════════════════ */
 function checkLogin(){
-  const rid=document.getElementById('room-id').value.trim();
-  const pw=document.getElementById('room-pw').value;
-  const nm=document.getElementById('my-name').value.trim();
+  /* 僅視覺回饋用，不控制按鈕 disabled */
   document.getElementById('login-err').style.display='none';
-  const ok=rid.length>=4 && pw.length>=4 && nm.length>0;
-  document.getElementById('btn-login').disabled=!ok;
 }
 
 async function doLogin(e){
-  const rid=document.getElementById('room-id').value.trim();
+  /* 每次按下時直接讀取當前值 — 不依賴 oninput */
+  const rid=document.getElementById('room-id').value.trim().toUpperCase();
   const pw=document.getElementById('room-pw').value;
   const nm=document.getElementById('my-name').value.trim();
   const err=document.getElementById('login-err');
   err.style.display='none';
 
-  if(rid.length<4){err.textContent='房間號至少4碼';err.style.display='block';return;}
-  if(pw.length<4){err.textContent='密碼至少4碼';err.style.display='block';return;}
-  if(!nm){err.textContent='請填寫暱稱';err.style.display='block';return;}
+  /* 基本驗證 */
+  if(rid.length<4){err.textContent='房間號至少需要4碼';err.style.display='block';return;}
+  if(pw.length<4){err.textContent='密碼至少需要4碼';err.style.display='block';return;}
+  if(!nm){err.textContent='請填寫你的暱稱';err.style.display='block';return;}
 
   showConnecting('連接房間中...');
   try{
-    // 1. check or create room
+    /* 1. 查詢或建立房間 */
     let{data:room,error:roomErr}=await sb.from('hc_rooms').select('*').eq('id',rid).maybeSingle();
     if(roomErr)throw roomErr;
 
     if(room){
-      // room exists — verify password
       if(room.pw!==pw){
         hideConnecting();
         err.textContent='密碼錯誤，請重新輸入';
@@ -617,23 +618,19 @@ async function doLogin(e){
         return;
       }
     } else {
-      // create new room
       const{error:insErr}=await sb.from('hc_rooms').insert({id:rid,pw:pw,plays:0});
       if(insErr)throw insErr;
     }
 
-    // 2. determine player slot (A or B)
+    /* 2. 決定玩家槽位 A 或 B */
     let{data:gs,error:gsErr}=await sb.from('hc_game_state').select('state').eq('room_id',rid).maybeSingle();
     if(gsErr)throw gsErr;
     let st=gs?.state||{};
     if(!st.players)st.players={};
-    const slots=Object.keys(st.players);
-    let myPlayer=null;
 
-    // rejoin if same name already in slot
+    let myPlayer=null;
     if(st.players.A?.name===nm) myPlayer='A';
     else if(st.players.B?.name===nm) myPlayer='B';
-    // fill empty slot
     else if(!st.players.A) myPlayer='A';
     else if(!st.players.B) myPlayer='B';
     else{
@@ -643,7 +640,7 @@ async function doLogin(e){
       return;
     }
 
-    // 3. save player into state
+    /* 3. 更新 state */
     G.roomId=rid; G.roomPw=pw; G.myName=nm; G.myPlayer=myPlayer;
     st.players[myPlayer]={name:nm,ready:false};
     const{error:upErr}=await sb.from('hc_game_state').upsert({
@@ -651,28 +648,29 @@ async function doLogin(e){
     });
     if(upErr)throw upErr;
 
-    // 4. connect realtime
+    /* 4. 訂閱 Realtime */
     await subscribeRoom();
 
-    // 5. broadcast join
+    /* 5. 廣播加入事件 */
     await sendEvent('join',{player:myPlayer,name:nm});
 
-    // 6. show waiting screen
+    /* 6. 顯示等待畫面 */
     document.getElementById('wait-code').textContent=rid;
     renderWaitingSlots(st.players);
 
-    // if both players already in state, start immediately
-    if(st.players.A && st.players.B && st.players.A.name!==nm){
-      G.oppName=myPlayer==='A'?st.players.B.name:st.players.A.name;
-      setTimeout(()=>startOddEven(),800);
+    /* 7. 如果對方已在，直接開始 */
+    const oppPlayer=myPlayer==='A'?'B':'A';
+    if(st.players[oppPlayer]){
+      G.oppName=st.players[oppPlayer].name;
+      setTimeout(()=>startOddEven(),900);
     } else {
       goScreen('s-waiting');
     }
 
   } catch(e2){
     hideConnecting();
-    const msg=(e2?.message||'').replace(/^.*Error:\s*/,'');
-    err.textContent='連線失敗：'+(msg||'請確認網路並重試');
+    const msg=(e2?.message||'').replace(/^.*?:\s*/,'').trim();
+    err.textContent='連線失敗：'+(msg||'請確認網路後重試');
     err.style.display='block';
     console.error('doLogin error:',e2);
   }
