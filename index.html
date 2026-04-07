@@ -5,7 +5,83 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Heart Cards</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ── Supabase REST + Realtime (no SDK, pure fetch + WebSocket) ── */
+const SB_URL='https://icgstmzwyyikdmqqdinn.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljZ3N0bXp3eXlpa2RtcXFkaW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI2NDIwNjEsImV4cCI6MjA1ODIxODA2MX0.ZelUh6BO4a0wXSjlRm1xt0UYpBl7i5b8_CJD4Y8bv_0';
+const HDR={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'return=representation'};
+
+/* REST helpers */
+async function dbGet(table,filters){
+  let url=SB_URL+'/rest/v1/'+table+'?'+filters+'&limit=1';
+  const r=await fetch(url,{headers:HDR});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j?.message||r.statusText);
+  return j[0]||null;
+}
+async function dbSelect(table,filters){
+  let url=SB_URL+'/rest/v1/'+table+'?'+filters;
+  const r=await fetch(url,{headers:HDR});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j?.message||r.statusText);
+  return j;
+}
+async function dbInsert(table,body){
+  const r=await fetch(SB_URL+'/rest/v1/'+table,{method:'POST',headers:HDR,body:JSON.stringify(body)});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j?.message||r.statusText);
+  return Array.isArray(j)?j[0]:j;
+}
+async function dbUpsert(table,body){
+  const h={...HDR,'Prefer':'resolution=merge-duplicates,return=representation'};
+  const r=await fetch(SB_URL+'/rest/v1/'+table,{method:'POST',headers:h,body:JSON.stringify(body)});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j?.message||r.statusText);
+  return Array.isArray(j)?j[0]:j;
+}
+async function dbUpdate(table,filters,body){
+  const r=await fetch(SB_URL+'/rest/v1/'+table+'?'+filters,{method:'PATCH',headers:HDR,body:JSON.stringify(body)});
+  if(!r.ok){const j=await r.json();throw new Error(j?.message||r.statusText);}
+}
+
+/* Realtime via WebSocket */
+let _ws=null,_wsChan=null,_wsListeners=[];
+function realtimeConnect(roomId,onMsg){
+  return new Promise((resolve,reject)=>{
+    if(_ws){try{_ws.close();}catch(e){}}
+    _wsListeners=[];
+    const wsUrl='wss://icgstmzwyyikdmqqdinn.supabase.co/realtime/v1/websocket?apikey='+SB_KEY+'&vsn=1.0.0';
+    _ws=new WebSocket(wsUrl);
+    const chan='hc:'+roomId;
+    _wsChan=chan;
+    let joined=false;
+    const hb=setInterval(()=>{if(_ws.readyState===1)_ws.send(JSON.stringify({topic:'phoenix',event:'heartbeat',payload:{},ref:null}));},25000);
+
+    _ws.onopen=()=>{
+      _ws.send(JSON.stringify({topic:chan,event:'phx_join',payload:{config:{broadcast:{self:false},presence:{key:''}}},ref:'1'}));
+    };
+    _ws.onmessage=(e)=>{
+      try{
+        const m=JSON.parse(e.data);
+        if(m.topic===chan&&m.event==='phx_reply'&&m.payload?.status==='ok'&&!joined){
+          joined=true;clearTimeout(tout);resolve();
+        }
+        if(m.topic===chan&&m.event==='broadcast'&&m.payload?.event==='game'){
+          onMsg(m.payload.payload);
+        }
+      }catch(err){}
+    };
+    _ws.onerror=(e)=>{clearInterval(hb);reject(new Error('WebSocket 錯誤'));};
+    _ws.onclose=()=>clearInterval(hb);
+    const tout=setTimeout(()=>reject(new Error('連線逾時，請重試')),12000);
+  });
+}
+function realtimeSend(roomId,payload){
+  if(!_ws||_ws.readyState!==1)return;
+  const msg={topic:'hc:'+roomId,event:'broadcast',payload:{type:'broadcast',event:'game',payload},ref:null};
+  _ws.send(JSON.stringify(msg));
+}
+</script>
 <style>
 :root{
   --pink:#E8336A;--pink-d:#B5194A;
@@ -450,12 +526,7 @@ html,body{height:100%;color:#4A0020;font-family:'Noto Sans TC',sans-serif;overfl
 <button id="music-btn">♪</button>
 
 <script>
-/* ══════════════════════════════════════
-   SUPABASE CONFIG
-══════════════════════════════════════ */
-const SUPABASE_URL='https://icgstmzwyyikdmqqdinn.supabase.co';
-const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljZ3N0bXp3eXlpa2RtcXFkaW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI2NDIwNjEsImV4cCI6MjA1ODIxODA2MX0.ZelUh6BO4a0wXSjlRm1xt0UYpBl7i5b8_CJD4Y8bv_0';
-const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
+/* Supabase via pure fetch - see top script block */
 
 /* ══════════════════════════════════════
    CANDY BACKGROUND
@@ -539,31 +610,13 @@ function goScreen(id){
    SUPABASE REALTIME
 ══════════════════════════════════════ */
 async function subscribeRoom(){
-  if(G.channel){try{await sb.removeChannel(G.channel);}catch(e){}}
-  G.channel=sb.channel('hc:'+G.roomId,{config:{broadcast:{self:false}}});
-  return new Promise((resolve,reject)=>{
-    const timeout=setTimeout(()=>{
-      reject(new Error('Realtime 連線逾時，請重試'));
-    },12000);
-    G.channel
-      .on('broadcast',{event:'game'},(msg)=>handleEvent(msg.payload))
-      .subscribe((status,err)=>{
-        if(status==='SUBSCRIBED'){
-          clearTimeout(timeout);
-          hideConnecting();
-          showToast('已連線到房間 '+G.roomId);
-          resolve();
-        } else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){
-          clearTimeout(timeout);
-          reject(new Error('頻道連線失敗: '+status));
-        }
-      });
-  });
+  await realtimeConnect(G.roomId,(payload)=>handleEvent(payload));
+  hideConnecting();
+  showToast('已連線到房間 '+G.roomId);
 }
 
 async function sendEvent(type,payload={}){
-  if(!G.channel)return;
-  await G.channel.send({type:'broadcast',event:'game',payload:{type,from:G.myPlayer,name:G.myName,...payload}});
+  realtimeSend(G.roomId,{type,from:G.myPlayer,name:G.myName,...payload});
 }
 
 function handleEvent(ev){
@@ -607,8 +660,7 @@ async function doLogin(e){
   showConnecting('連接房間中...');
   try{
     /* 1. 查詢或建立房間 */
-    let{data:room,error:roomErr}=await sb.from('hc_rooms').select('*').eq('id',rid).maybeSingle();
-    if(roomErr)throw roomErr;
+    let room=await dbGet('hc_rooms','id=eq.'+rid+'&select=*');
 
     if(room){
       if(room.pw!==pw){
@@ -618,14 +670,12 @@ async function doLogin(e){
         return;
       }
     } else {
-      const{error:insErr}=await sb.from('hc_rooms').insert({id:rid,pw:pw,plays:0});
-      if(insErr)throw insErr;
+      await dbInsert('hc_rooms',{id:rid,pw:pw,plays:0});
     }
 
     /* 2. 決定玩家槽位 A 或 B */
-    let{data:gs,error:gsErr}=await sb.from('hc_game_state').select('state').eq('room_id',rid).maybeSingle();
-    if(gsErr)throw gsErr;
-    let st=gs?.state||{};
+    let gsRow=await dbGet('hc_game_state','room_id=eq.'+rid+'&select=state');
+    let st=gsRow?.state||{};
     if(!st.players)st.players={};
 
     let myPlayer=null;
@@ -643,10 +693,7 @@ async function doLogin(e){
     /* 3. 更新 state */
     G.roomId=rid; G.roomPw=pw; G.myName=nm; G.myPlayer=myPlayer;
     st.players[myPlayer]={name:nm,ready:false};
-    const{error:upErr}=await sb.from('hc_game_state').upsert({
-      room_id:rid, state:st, updated_at:new Date().toISOString()
-    });
-    if(upErr)throw upErr;
+    await dbUpsert('hc_game_state',{room_id:rid,state:st,updated_at:new Date().toISOString()});
 
     /* 4. 訂閱 Realtime */
     await subscribeRoom();
@@ -694,8 +741,8 @@ function renderWaitingSlots(players){
 async function onOppJoin(ev){
   G.oppName=ev.name;
   showToast(ev.name+' 加入了房間！');
-  let{data:gs}=await sb.from('hc_game_state').select('state').eq('room_id',G.roomId).maybeSingle();
-  const st=gs?.state||{};
+  let gsRow=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
+  const st=gsRow?.state||{};
   renderWaitingSlots(st.players||{});
   const players=st.players||{};
   if(players.A&&players.B){
@@ -1179,8 +1226,7 @@ function revealResult(){
   document.getElementById('punish-result-a').textContent='① '+G.punishA;
   document.getElementById('punish-result-b').textContent='② '+(_oppPunish||'對方未填');
   // update plays count
-  sb.from('hc_rooms').update({plays:supabase.rpc?undefined:undefined}).eq('id',G.roomId);
-  sb.rpc?undefined:sb.from('hc_rooms').select('plays').eq('id',G.roomId).single().then(({data})=>{if(data)sb.from('hc_rooms').update({plays:(data.plays||0)+1}).eq('id',G.roomId);});
+  dbGet('hc_rooms','id=eq.'+G.roomId+'&select=plays').then(r=>{if(r)dbUpdate('hc_rooms','id=eq.'+G.roomId,{plays:(r.plays||0)+1});}).catch(()=>{});
   goScreen('s-result');
   if(iWin)launchConfetti();
 }
@@ -1223,7 +1269,7 @@ function getHandRank(cards){
 ══════════════════════════════════════ */
 async function showLeaderboard(){
   showConnecting('載入排行榜...');
-  const{data}=await sb.from('hc_rooms').select('id,plays').order('plays',{ascending:false}).limit(20);
+  const data=await dbSelect('hc_rooms','select=id,plays&order=plays.desc&limit=20');
   hideConnecting();
   const rankCls=['r1','r2','r3'];
   const rows=(data||[]).map((r,i)=>`<tr><td><span class="rank-badge ${rankCls[i]||'rn'}">${i+1}</span></td><td>${r.id}</td><td style="text-align:right;font-weight:500;">${r.plays} 局</td></tr>`).join('');
