@@ -662,13 +662,12 @@ async function enterRoom(){
   if(rid.length<1){err.textContent='請輸入房間號';err.style.display='block';return;}
   showConnecting('進入房間中...');
   try{
-    /* create room if not exists */
+    /* 1. REST only — create room if not exists */
     let room=await dbGet('hc_rooms','id=eq.'+rid+'&select=id');
-    if(!room) await dbInsert('hc_rooms',{id:rid,plays:0});
+    if(!room){ try{await dbInsert('hc_rooms',{id:rid,plays:0});}catch(e2){console.log('room exists ok');} }
     G.roomId=rid;
-    /* subscribe realtime */
-    await subscribeRoom();
-    /* go to lobby */
+    /* 2. show lobby immediately */
+    hideConnecting();
     document.getElementById('lobby-room-title').textContent='房間 '+rid;
     document.getElementById('my-name-inp').value='';
     document.getElementById('my-name-section').style.display='block';
@@ -676,13 +675,17 @@ async function enterRoom(){
     _mySlot=null; _isReady=false;
     await renderLobby();
     goScreen('s-lobby');
-    /* start polling */
-    _lobbyPoll=setInterval(renderLobby,3000);
+    /* 3. WebSocket in background — non-blocking */
+    subscribeRoom().catch(e=>console.warn('Realtime:',e));
+    /* 4. poll every 2s */
+    clearInterval(_lobbyPoll);
+    _lobbyPoll=setInterval(renderLobby,2000);
   }catch(e){
     hideConnecting();
-    err.textContent='連線失敗，請重試';
+    const msg=(e?.message||'').slice(0,80);
+    err.textContent='連線失敗：'+(msg||'請確認網路後重試');
     err.style.display='block';
-    console.error(e);
+    console.error('enterRoom:',e);
   }
 }
 
@@ -721,7 +724,7 @@ async function toggleReady(){
   if(!_mySlot){showToast('請先填寫暱稱');return;}
   _isReady=!_isReady;
   try{
-    await dbUpdate('hc_lobby','room_id=eq.'+G.roomId+'%26slot=eq.'+_mySlot,{ready:_isReady,updated_at:new Date().toISOString()});
+    await dbUpdate('hc_lobby','room_id=eq.'+G.roomId+'&slot=eq.'+_mySlot,{ready:_isReady,updated_at:new Date().toISOString()});
     await sendEvent('lobby_update',{slot:_mySlot,nickname:G.myName,ready:_isReady});
     const btn=document.getElementById('btn-ready');
     if(_isReady){
