@@ -134,11 +134,13 @@ html,body{height:100%;color:#4A0020;font-family:'Noto Sans TC',sans-serif;overfl
 .room-code-big{font-family:'Noto Serif TC',serif;font-size:48px;font-weight:700;color:#fff;letter-spacing:.15em;text-align:center;text-shadow:0 4px 16px rgba(0,0,0,.2);margin:1rem 0;}
 .room-code-box{width:100%;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.35);border-radius:var(--r);padding:1.5rem;text-align:center;margin-bottom:1.5rem;backdrop-filter:blur(6px);}
 .player-slots{display:flex;gap:12px;width:100%;margin-bottom:1.5rem;}
-.player-slot{flex:1;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.3);border-radius:var(--r2);padding:1rem;text-align:center;backdrop-filter:blur(4px);}
-.player-slot.joined{border-color:rgba(255,255,255,.7);background:rgba(255,255,255,.25);}
-.slot-icon{font-size:28px;margin-bottom:4px;}
+.lobby-slot{flex:1;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.3);border-radius:var(--r);padding:1rem .75rem;text-align:center;transition:all .3s;}
+.lobby-slot.filled{background:rgba(255,255,255,.28);border-color:rgba(255,255,255,.7);}
+.lobby-slot.is-ready{border-color:#FFEB3B;background:rgba(255,235,59,.12);}
+.slot-icon{font-size:28px;margin-bottom:6px;}
 .slot-name{font-size:13px;font-weight:500;color:#fff;}
 .slot-status{font-size:11px;color:rgba(255,255,255,.65);margin-top:2px;}
+.slot-ready-badge{display:block;margin-top:5px;font-size:11px;color:#FFEB3B;font-weight:500;}
 .pulse-dot{width:8px;height:8px;border-radius:50%;background:#FFEB3B;display:inline-block;margin-right:4px;animation:pulseDot 1.5s ease infinite;}
 @keyframes pulseDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
 
@@ -299,33 +301,43 @@ html,body{height:100%;color:#4A0020;font-family:'Noto Sans TC',sans-serif;overfl
 <!-- S1: LOGIN -->
 <div id="s-login" class="screen active">
   <p class="logo">Heart<span> / </span>Cards</p>
-  <div class="steps"><div class="step-d a"></div><div class="step-d"></div><div class="step-d"></div></div>
-  <p class="ttl">建立或加入房間</p>
-  <p class="sub">輸入房間號與密碼進入遊戲<br>房間不存在時自動建立</p>
-  <input class="inp" id="room-id" placeholder="房間號（4-8碼英數字）" maxlength="8"
-    oninput="this.value=this.value.toUpperCase();checkLogin()"
-    onchange="this.value=this.value.toUpperCase();checkLogin()">
-  <input class="inp" id="room-pw" type="password" placeholder="房間密碼（至少4碼）"
-    oninput="checkLogin()" onchange="checkLogin()">
+  <p class="ttl">輸入房間號</p>
+  <p class="sub">直接輸入任意房間號進入<br>不需要密碼，房間不存在時自動建立</p>
+  <input class="inp" id="room-id" placeholder="房間號（例如 LOVE、1234）" maxlength="8"
+    autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
+    oninput="this.value=this.value.toUpperCase()">
   <p class="err" id="login-err" style="display:none;"></p>
-  <input class="inp" id="my-name" placeholder="你的暱稱" maxlength="10"
-    oninput="checkLogin()" onchange="checkLogin()">
-  <button class="btn pri" id="btn-login" onclick="doLogin(event)">進入房間</button>
-  <div class="divider"><div class="div-line"></div><div class="div-txt">房間排行榜</div><div class="div-line"></div></div>
+  <button class="btn pri" onclick="enterRoom()">進入房間</button>
+  <div class="divider"><div class="div-line"></div><div class="div-txt">排行榜</div><div class="div-line"></div></div>
   <button class="btn ghost btn-sm" style="width:auto;" onclick="showLeaderboard()">查看排行榜</button>
 </div>
 
-<!-- S2: WAITING ROOM -->
-<div id="s-waiting" class="screen">
+<!-- S2: LOBBY -->
+<div id="s-lobby" class="screen">
   <p class="logo">Heart<span> / </span>Cards</p>
-  <p class="ttl">等待另一半加入</p>
-  <div class="room-code-box">
-    <p style="font-size:12px;color:rgba(255,255,255,.7);margin-bottom:.25rem;">把房間碼傳給對方</p>
-    <div class="room-code-big" id="wait-code">----</div>
-    <p style="font-size:12px;color:rgba(255,255,255,.6);">對方用相同密碼加入</p>
+  <p class="ttl" id="lobby-room-title">房間</p>
+  <p class="sub">填寫暱稱後等待對方加入，雙方同意即開始</p>
+
+  <div style="width:100%;display:flex;gap:12px;margin-bottom:1.5rem;" id="lobby-slots">
+    <!-- rendered by JS -->
   </div>
-  <div class="player-slots" id="player-slots"></div>
-  <p style="font-size:12px;color:rgba(255,255,255,.6);text-align:center;"><span class="pulse-dot"></span>等待雙方就緒...</p>
+
+  <div id="my-name-section" style="width:100%;">
+    <input class="inp" id="my-name-inp" placeholder="填寫你的暱稱" maxlength="10"
+      autocomplete="off" autocorrect="off" spellcheck="false">
+    <button class="btn pri" id="btn-set-name" onclick="setNickname()">確認暱稱</button>
+  </div>
+
+  <div id="ready-section" style="display:none;width:100%;">
+    <div style="background:rgba(255,255,255,.15);border-radius:var(--r2);padding:.75rem 1rem;margin-bottom:.75rem;text-align:center;">
+      <p style="font-size:13px;color:rgba(255,255,255,.8);">你的暱稱：<strong style="color:#fff;" id="my-name-display"></strong></p>
+    </div>
+    <button class="btn pri" id="btn-ready" onclick="toggleReady()">同意開始遊戲</button>
+  </div>
+
+  <div id="lobby-status" style="font-size:12px;color:rgba(255,255,255,.6);text-align:center;margin-top:.75rem;">
+    <span class="pulse-dot"></span>等待雙方就緒...
+  </div>
 </div>
 
 <!-- S3: ODD/EVEN -->
@@ -602,7 +614,7 @@ let G={
 function goScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  const map={'s-login':'lobby','s-waiting':'lobby','s-odd-even':'lobby','s-guardian':'guardian','s-deal':'deal','s-hand':'battle','s-challenge':'battle','s-wait-challenge':'battle','s-pick':'battle','s-pre-punish':'lobby','s-result':null,'s-lb':'lobby'};
+  const map={'s-login':'lobby','s-lobby':'lobby','s-odd-even':'lobby','s-guardian':'guardian','s-deal':'deal','s-hand':'battle','s-challenge':'battle','s-wait-challenge':'battle','s-pick':'battle','s-pre-punish':'lobby','s-result':null,'s-lb':'lobby'};
   if(map[id]!==undefined&&map[id]!==null)musicStart(map[id]);
 }
 
@@ -620,144 +632,167 @@ async function sendEvent(type,payload={}){
 }
 
 function handleEvent(ev){
-  const from=ev.from;
-  if(from===G.myPlayer)return; // ignore own events
+  if(ev.from===G.myPlayer)return;
   switch(ev.type){
-    case 'join':        onOppJoin(ev);        break;
-    case 'oe_choose':   onOppOEChoose(ev);    break;
-    case 'guardian':    onOppGuardian(ev);    break;
-    case 'blanks_done': onOppBlanksDone(ev);  break;
-    case 'play_card':   onOppPlayCard(ev);    break;
-    case 'challenge_result': onChallengeResult(ev); break;
-    case 'vault_pick':  onOppVaultPick(ev);   break;
-    case 'punish_b':    onPunishB(ev);        break;
-    case 'next_round':  onNextRound(ev);      break;
-    case 'round_done':  onRoundDone(ev);      break;
+    case 'lobby_update':     onLobbyUpdate(ev);        break;
+    case 'oe_choose':        onOppOEChoose(ev);        break;
+    case 'guardian':         onOppGuardian(ev);        break;
+    case 'blanks_done':      onOppBlanksDone(ev);      break;
+    case 'play_card':        onOppPlayCard(ev);        break;
+    case 'challenge_result': onChallengeResult(ev);    break;
+    case 'vault_pick':       onOppVaultPick(ev);       break;
+    case 'punish_b':         onPunishB(ev);            break;
+    case 'next_round':       onNextRound(ev);          break;
+    case 'round_done':       onRoundDone(ev);          break;
   }
 }
 
 /* ══════════════════════════════════════
-   LOGIN & ROOM
+   LOBBY SYSTEM
 ══════════════════════════════════════ */
-function checkLogin(){
-  /* 僅視覺回饋用，不控制按鈕 disabled */
-  document.getElementById('login-err').style.display='none';
-}
+let _lobbyPoll=null;
+let _mySlot=null;   // 'A' or 'B'
+let _isReady=false;
 
-async function doLogin(e){
-  /* 每次按下時直接讀取當前值 — 不依賴 oninput */
+/* Step 1: Enter room by code only */
+async function enterRoom(){
   const rid=document.getElementById('room-id').value.trim().toUpperCase();
-  const pw=document.getElementById('room-pw').value;
-  const nm=document.getElementById('my-name').value.trim();
   const err=document.getElementById('login-err');
   err.style.display='none';
-
-  /* 基本驗證 */
-  if(rid.length<4){err.textContent='房間號至少需要4碼';err.style.display='block';return;}
-  if(pw.length<4){err.textContent='密碼至少需要4碼';err.style.display='block';return;}
-  if(!nm){err.textContent='請填寫你的暱稱';err.style.display='block';return;}
-
-  showConnecting('連接房間中...');
+  if(rid.length<1){err.textContent='請輸入房間號';err.style.display='block';return;}
+  showConnecting('進入房間中...');
   try{
-    /* 1. 查詢或建立房間 */
-    let room=await dbGet('hc_rooms','id=eq.'+rid+'&select=*');
-
-    if(room){
-      if(room.pw!==pw){
-        hideConnecting();
-        err.textContent='密碼錯誤，請重新輸入';
-        err.style.display='block';
-        return;
-      }
-    } else {
-      await dbInsert('hc_rooms',{id:rid,pw:pw,plays:0});
-    }
-
-    /* 2. 決定玩家槽位 A 或 B */
-    let gsRow=await dbGet('hc_game_state','room_id=eq.'+rid+'&select=state');
-    let st=gsRow?.state||{};
-    if(!st.players)st.players={};
-
-    let myPlayer=null;
-    if(st.players.A?.name===nm) myPlayer='A';
-    else if(st.players.B?.name===nm) myPlayer='B';
-    else if(!st.players.A) myPlayer='A';
-    else if(!st.players.B) myPlayer='B';
-    else{
-      hideConnecting();
-      err.textContent='房間已滿（2人），請換個房間號';
-      err.style.display='block';
-      return;
-    }
-
-    /* 3. 更新 state */
-    G.roomId=rid; G.roomPw=pw; G.myName=nm; G.myPlayer=myPlayer;
-    st.players[myPlayer]={name:nm,ready:false};
-    await dbUpsert('hc_game_state',{room_id:rid,state:st,updated_at:new Date().toISOString()});
-
-    /* 4. 訂閱 Realtime */
+    /* create room if not exists */
+    let room=await dbGet('hc_rooms','id=eq.'+rid+'&select=id');
+    if(!room) await dbInsert('hc_rooms',{id:rid,plays:0});
+    G.roomId=rid;
+    /* subscribe realtime */
     await subscribeRoom();
-
-    /* 5. 廣播加入事件 */
-    await sendEvent('join',{player:myPlayer,name:nm});
-
-    /* 6. 顯示等待畫面 */
-    document.getElementById('wait-code').textContent=rid;
-    renderWaitingSlots(st.players);
-
-    /* 7. 如果對方已在，直接開始 */
-    const oppPlayer=myPlayer==='A'?'B':'A';
-    if(st.players[oppPlayer]){
-      G.oppName=st.players[oppPlayer].name;
-      setTimeout(()=>startOddEven(),900);
-    } else {
-      goScreen('s-waiting');
-    }
-
-  } catch(e2){
+    /* go to lobby */
+    document.getElementById('lobby-room-title').textContent='房間 '+rid;
+    document.getElementById('my-name-inp').value='';
+    document.getElementById('my-name-section').style.display='block';
+    document.getElementById('ready-section').style.display='none';
+    _mySlot=null; _isReady=false;
+    await renderLobby();
+    goScreen('s-lobby');
+    /* start polling */
+    _lobbyPoll=setInterval(renderLobby,3000);
+  }catch(e){
     hideConnecting();
-    const msg=(e2?.message||'').replace(/^.*?:\s*/,'').trim();
-    err.textContent='連線失敗：'+(msg||'請確認網路後重試');
+    err.textContent='連線失敗，請重試';
     err.style.display='block';
-    console.error('doLogin error:',e2);
+    console.error(e);
   }
 }
+
+/* Step 2: Set nickname → claim slot */
+async function setNickname(){
+  const nm=document.getElementById('my-name-inp').value.trim();
+  if(!nm){showToast('請填寫暱稱');return;}
+  showConnecting('儲存暱稱...');
+  try{
+    /* find empty slot */
+    const rows=await dbSelect('hc_lobby','room_id=eq.'+G.roomId+'&select=slot,nickname');
+    const taken=rows.map(r=>r.slot);
+    /* if already claimed this room by same name */
+    const mine=rows.find(r=>r.nickname===nm);
+    if(mine){_mySlot=mine.slot;}
+    else if(!taken.includes('A')){_mySlot='A';}
+    else if(!taken.includes('B')){_mySlot='B';}
+    else{hideConnecting();showToast('房間已滿，請換一個房間號');return;}
+    G.myName=nm;
+    await dbUpsert('hc_lobby',{room_id:G.roomId,slot:_mySlot,nickname:nm,ready:false,updated_at:new Date().toISOString()});
+    await sendEvent('lobby_update',{slot:_mySlot,nickname:nm,ready:false});
+    hideConnecting();
+    document.getElementById('my-name-display').textContent=nm;
+    document.getElementById('my-name-section').style.display='none';
+    document.getElementById('ready-section').style.display='block';
+    _isReady=false;
+    document.getElementById('btn-ready').textContent='同意開始遊戲';
+    document.getElementById('btn-ready').style.background='#fff';
+    document.getElementById('btn-ready').style.color='#B5194A';
+    await renderLobby();
+  }catch(e){hideConnecting();showToast('儲存失敗，請重試');console.error(e);}
 }
 
-function renderWaitingSlots(players){
-  const wrap=document.getElementById('player-slots');
-  wrap.innerHTML='';
-  ['A','B'].forEach(p=>{
-    const pl=players[p];
-    const slot=document.createElement('div');
-    slot.className='player-slot'+(pl?' joined':'');
-    slot.innerHTML=`<div class="slot-icon">${p==='A'?'👑':'💕'}</div>
-      <div class="slot-name">${pl?.name||'等待中...'}</div>
-      <div class="slot-status">${pl?'已進入':'尚未加入'}</div>`;
-    wrap.appendChild(slot);
-  });
+/* Step 3: Toggle ready */
+async function toggleReady(){
+  if(!_mySlot){showToast('請先填寫暱稱');return;}
+  _isReady=!_isReady;
+  try{
+    await dbUpdate('hc_lobby','room_id=eq.'+G.roomId+'%26slot=eq.'+_mySlot,{ready:_isReady,updated_at:new Date().toISOString()});
+    await sendEvent('lobby_update',{slot:_mySlot,nickname:G.myName,ready:_isReady});
+    const btn=document.getElementById('btn-ready');
+    if(_isReady){
+      btn.textContent='取消同意';
+      btn.style.background='rgba(255,255,255,.2)';
+      btn.style.color='#fff';
+      showToast('已同意開始，等待對方...');
+    } else {
+      btn.textContent='同意開始遊戲';
+      btn.style.background='#fff';
+      btn.style.color='#B5194A';
+    }
+    await renderLobby();
+  }catch(e){_isReady=!_isReady;showToast('操作失敗');console.error(e);}
 }
 
-async function onOppJoin(ev){
-  G.oppName=ev.name;
-  showToast(ev.name+' 加入了房間！');
-  let gsRow=await dbGet('hc_game_state','room_id=eq.'+G.roomId+'&select=state');
-  const st=gsRow?.state||{};
-  renderWaitingSlots(st.players||{});
-  const players=st.players||{};
-  if(players.A&&players.B){
-    setTimeout(()=>startOddEven(),900);
+/* Render lobby slots */
+async function renderLobby(){
+  try{
+    const rows=await dbSelect('hc_lobby','room_id=eq.'+G.roomId+'&select=slot,nickname,ready&order=slot.asc');
+    const slotMap={};
+    rows.forEach(r=>{slotMap[r.slot]=r;});
+    const wrap=document.getElementById('lobby-slots');
+    if(!wrap)return;
+    wrap.innerHTML='';
+    ['A','B'].forEach(s=>{
+      const r=slotMap[s];
+      const isMe=s===_mySlot;
+      const div=document.createElement('div');
+      div.className='lobby-slot'+(r?' filled':'')+(r?.ready?' is-ready':'');
+      const icon=s==='A'?'👑':'💕';
+      const name=r?r.nickname:'等待中...';
+      const status=r?(r.ready?'已同意開始':'已加入'):'尚未加入';
+      const readyBadge=r?.ready?'<span class="slot-ready-badge">✓ 同意開始</span>':'';
+      const meTag=isMe?'<span style="font-size:10px;color:rgba(255,255,255,.6);">（你）</span>':'';
+      div.innerHTML=`<div class="slot-icon">${icon}</div>
+        <div class="slot-name">${name} ${meTag}</div>
+        <div class="slot-status">${status}</div>
+        ${readyBadge}`;
+      wrap.appendChild(div);
+    });
+    /* check both ready → start */
+    if(slotMap.A&&slotMap.B&&slotMap.A.ready&&slotMap.B.ready){
+      clearInterval(_lobbyPoll);
+      G.myPlayer=_mySlot;
+      const oppSlot=_mySlot==='A'?'B':'A';
+      G.oppName=slotMap[oppSlot]?.nickname||'對方';
+      setTimeout(()=>startOddEven(),600);
+    }
+  }catch(e){console.error('renderLobby error',e);}
+}
+
+/* Handle lobby_update from opponent */
+function onLobbyUpdate(ev){
+  renderLobby();
+  if(ev.nickname&&ev.slot!==_mySlot){
+    G.oppName=ev.nickname;
+    if(ev.ready) showToast(ev.nickname+' 已同意開始！');
+    else if(ev.nickname) showToast(ev.nickname+' 加入了房間');
   }
 }
 
 function startOddEven(){
+  clearInterval(_lobbyPoll);
   G.deck=makeDeck();
   document.getElementById('oe-btns').style.display='flex';
   document.getElementById('oe-my-choice').style.display='none';
   document.getElementById('dice-section').style.display='none';
   document.getElementById('dice-result').style.display='none';
   goScreen('s-odd-even');
-  showToast('雙方已就緒！決定先後手');
+  showToast('雙方都已就緒！決定先後手');
 }
 
 /* ══════════════════════════════════════
