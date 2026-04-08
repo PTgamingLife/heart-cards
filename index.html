@@ -860,9 +860,16 @@ function startOEScreen(){
     G.myPlayer==='A'?'點擊硬幣投擲':'等待對方投擲硬幣...';
   document.getElementById('coin-result-box').style.display='none';
   document.getElementById('coin-inner').style.transform='';
-  /* Player B polls for result */
+  /* 進入畫面時立即讀DB，看是否已有結果 */
+  clearInterval(_coinPoller);
   if(G.myPlayer==='B'){
-    _coinPoller=setInterval(_pollCoin,1500);
+    readState().then(st=>{
+      if(st.coin&&!_coinFlipped){
+        _coinFlipped=true;_animateCoin(st.coin);
+      } else {
+        _coinPoller=setInterval(_pollCoin,1500);
+      }
+    }).catch(()=>{_coinPoller=setInterval(_pollCoin,1500);});
   }
 }
 
@@ -875,8 +882,9 @@ function flipCoin(){
   /* random: 0=A先手, 1=B先手 */
   const result=Math.random()<0.5?'A':'B';
   /* save to DB immediately so B can poll */
-  mergeState({coin:result}).catch(()=>{});
-  sendEvent('coin_result',{result});
+  mergeState({coin:result}).then(()=>{
+    sendEvent('coin_result',{result});
+  }).catch(()=>{sendEvent('coin_result',{result});});
   _animateCoin(result);
 }
 
@@ -928,8 +936,14 @@ async function _pollCoin(){
 let _oppGuardianDone=false;
 function buildGuardian(){
   _oppGuardianDone=false;
+  clearInterval(_guardianPoller);
   document.getElementById('guardian-waiting').style.display='none';
   document.getElementById('btn-guardian').disabled=true;
+  /* 進入時先讀DB，對方可能已先選好 */
+  readState().then(st=>{
+    const oppSlot=G.myPlayer==='A'?'B':'A';
+    if(st.guardian?.[oppSlot]) _oppGuardianDone=true;
+  }).catch(()=>{});
   const grid=document.getElementById('guardian-grid');
   grid.innerHTML='';
   GUARDIANS.forEach((g,i)=>{
@@ -939,6 +953,9 @@ function buildGuardian(){
     d.onclick=()=>selectGuardian(g.id);
     grid.appendChild(d);
   });
+  /* 進入畫面就開始輪詢對方，不等自己確認 */
+  clearInterval(_guardianPoller);
+  _guardianPoller=setInterval(_pollGuardian,1500);
 }
 function selectGuardian(id){
   G.myGuardian=GUARDIANS.find(g=>g.id===id);
@@ -954,22 +971,30 @@ let _guardianPoller=null;
 async function confirmGuardian(){
   document.getElementById('guardian-waiting').style.display='block';
   document.getElementById('btn-guardian').disabled=true;
-  /* broadcast + write to DB */
   sendEvent('guardian',{guardian:G.myGuardian.id});
+  /* 寫入巢狀 {guardian:{A:'fire'}} 格式 */
   await mergeState({guardian:{[G.myPlayer]:G.myGuardian.id}}).catch(()=>{});
-  if(_oppGuardianDone){ clearInterval(_guardianPoller); startDealPhase(); return; }
-  /* poll fallback */
+  /* 立即讀DB看對方是否已確認 */
+  const st=await readState().catch(()=>({}));
+  const oppSlot=G.myPlayer==='A'?'B':'A';
+  if(st.guardian?.[oppSlot]){
+    _oppGuardianDone=true;
+    clearInterval(_guardianPoller);
+    startDealPhase();
+    return;
+  }
+  clearInterval(_guardianPoller);
   _guardianPoller=setInterval(_pollGuardian,1500);
 }
 async function _pollGuardian(){
-  if(_oppGuardianDone){ clearInterval(_guardianPoller); return; }
+  if(_oppGuardianDone){clearInterval(_guardianPoller);return;}
   try{
     const st=await readState();
     const oppSlot=G.myPlayer==='A'?'B':'A';
-    if(st.guardian?.[oppSlot]&&!_oppGuardianDone){
+    if(st.guardian?.[oppSlot]){
       _oppGuardianDone=true;clearInterval(_guardianPoller);
       showToast(G.oppName+' 已選好守護神');
-      if(document.getElementById('guardian-waiting').style.display==='block')startDealPhase();
+      startDealPhase();
     }
   }catch(e){}
 }
@@ -995,6 +1020,9 @@ function startDealPhase(){
   document.getElementById('deal-waiting').style.display='none';
   document.getElementById('btn-deal').disabled=true;
   goScreen('s-deal');
+  /* 進入畫面就開始輪詢對方填寫狀態 */
+  clearInterval(_blanksPoller);
+  _blanksPoller=setInterval(_pollBlanks,1500);
 }
 function renderBlanks(){
   const wrap=document.getElementById('blank-cards');wrap.innerHTML='';
@@ -1035,26 +1063,39 @@ async function submitBlankCards(){
   document.getElementById('deal-waiting').style.display='block';
   document.getElementById('btn-deal').disabled=true;
   const tasks=G.blankCards.map(c=>({suit:c.suit,val:c.val,task:c.task}));
-  /* broadcast + write to DB */
   sendEvent('blanks_done',{tasks});
   await mergeState({blanks:{[G.myPlayer]:tasks}}).catch(()=>{});
-  if(_oppBlanksDone){ clearInterval(_blanksPoller); startBattle(); return; }
+  /* 立即讀DB看對方是否已確認 */
+  const st=await readState().catch(()=>({}));
+  const oppSlot=G.myPlayer==='A'?'B':'A';
+  const oppTasksNow=st.blanks?.[oppSlot];
+  if(oppTasksNow){
+    _oppBlanksDone=true;
+    clearInterval(_blanksPoller);
+    oppTasksNow.forEach(t=>{
+      const card=G.deck.find(card=>card.suit===t.suit&&card.val===t.val);
+      if(card){card.task=t.task;card.customFilled=true;}
+    });
+    startBattle();
+    return;
+  }
+  clearInterval(_blanksPoller);
   _blanksPoller=setInterval(_pollBlanks,1500);
 }
 async function _pollBlanks(){
-  if(_oppBlanksDone){ clearInterval(_blanksPoller); return; }
+  if(_oppBlanksDone){clearInterval(_blanksPoller);return;}
   try{
     const st=await readState();
     const oppSlot=G.myPlayer==='A'?'B':'A';
-    const oppTasks=st.blanks?.[oppSlot];
-    if(oppTasks&&!_oppBlanksDone){
+    const oppTasks=st['blanks_'+oppSlot];
+    if(oppTasks){
       _oppBlanksDone=true;clearInterval(_blanksPoller);
       oppTasks.forEach(t=>{
         const card=G.deck.find(card=>card.suit===t.suit&&card.val===t.val);
         if(card){card.task=t.task;card.customFilled=true;}
       });
       showToast(G.oppName+' 已填好任務卡');
-      if(document.getElementById('deal-waiting').style.display==='block')startBattle();
+      startBattle();
     }
   }catch(e){}
 }
@@ -1096,19 +1137,22 @@ async function _pollBattle(){
     const st=await readState();
     const oppSlot=G.myPlayer==='A'?'B':'A';
     /* Check if opponent played a card we haven't seen */
-    if(st.play?.slot===oppSlot && st.play?.round===G.round){
+    const playKey='play_r'+G.round;
+    const chalKey='chal_r'+G.round;
+    if(st[playKey]&&st[playKey].startsWith(oppSlot+'|')){
+      const cardData=JSON.parse(st[playKey].slice(oppSlot.length+1));
       const cur=document.getElementById('s-hand');
       if(cur&&cur.classList.contains('active')){
         clearInterval(_battlePoller);
-        onOppPlayCard({card:st.play.card});
+        onOppPlayCard({card:cardData});
       }
     }
-    /* Check challenge result we haven't seen */
-    if(st.challenge?.slot===oppSlot && st.challenge?.round===G.round){
+    if(st[chalKey]&&st[chalKey].startsWith(oppSlot+'|')){
+      const success=st[chalKey].endsWith('true');
       const cur=document.getElementById('s-wait-challenge');
       if(cur&&cur.classList.contains('active')){
         clearInterval(_battlePoller);
-        onChallengeResult({success:st.challenge.success,round:st.challenge.round});
+        onChallengeResult({success,round:G.round});
       }
     }
   }catch(e){}
