@@ -329,21 +329,30 @@ html,body{height:100%;color:#4A0020;font-family:'Noto Sans TC',sans-serif;overfl
 <div id="s-lobby" class="screen">
   <p class="logo">Heart<span> / </span>Cards</p>
   <p class="ttl" id="lobby-room-title">房間</p>
-  <p class="sub">填寫暱稱後等待對方加入，雙方同意即開始</p>
+  <p class="sub">填寫暱稱、選好守護神，雙方同意後開始</p>
 
-  <div style="width:100%;display:flex;gap:12px;margin-bottom:1.5rem;" id="lobby-slots">
-    <!-- rendered by JS -->
-  </div>
+  <div style="width:100%;display:flex;gap:12px;margin-bottom:1.25rem;" id="lobby-slots"></div>
 
+  <!-- Step 1: 填暱稱 + 選守護神 -->
   <div id="my-name-section" style="width:100%;">
     <input class="inp" id="my-name-inp" placeholder="填寫你的暱稱" maxlength="10"
       autocomplete="off" autocorrect="off" spellcheck="false">
-    <button class="btn pri" id="btn-set-name" onclick="setNickname()">確認暱稱</button>
+
+    <p style="font-size:12px;color:rgba(255,255,255,.75);margin-bottom:.5rem;margin-top:.25rem;">選擇守護神天賦</p>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;width:100%;margin-bottom:.75rem;" id="lobby-guardian-grid"></div>
+    <div id="lobby-guardian-detail" style="display:none;background:rgba(255,255,255,.15);border-radius:var(--r2);padding:.6rem .75rem;margin-bottom:.75rem;font-size:12px;color:rgba(255,255,255,.9);"></div>
+
+    <button class="btn pri" id="btn-set-name" onclick="setNickname()">確認暱稱與守護神</button>
   </div>
 
+  <!-- Step 2: 確認後顯示 -->
   <div id="ready-section" style="display:none;width:100%;">
-    <div style="background:rgba(255,255,255,.15);border-radius:var(--r2);padding:.75rem 1rem;margin-bottom:.75rem;text-align:center;">
-      <p style="font-size:13px;color:rgba(255,255,255,.8);">你的暱稱：<strong style="color:#fff;" id="my-name-display"></strong></p>
+    <div style="background:rgba(255,255,255,.15);border-radius:var(--r2);padding:.75rem 1rem;margin-bottom:.75rem;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <p style="font-size:13px;color:rgba(255,255,255,.8);">暱稱：<strong style="color:#fff;" id="my-name-display"></strong></p>
+        <p style="font-size:12px;color:rgba(255,255,255,.65);margin-top:3px;">守護神：<strong style="color:#FFE0EC;" id="my-guardian-display"></strong></p>
+      </div>
+      <button class="btn sm ghost" onclick="resetLobbyChoice()" style="width:auto;font-size:11px;padding:6px 12px;">重選</button>
     </div>
     <button class="btn pri" id="btn-ready" onclick="toggleReady()">同意開始遊戲</button>
   </div>
@@ -385,20 +394,6 @@ html,body{height:100%;color:#4A0020;font-family:'Noto Sans TC',sans-serif;overfl
 </div>
 
 <!-- S4: GUARDIAN -->
-<div id="s-guardian" class="screen">
-  <p class="logo">Heart<span> / </span>Cards</p>
-  <div class="steps"><div class="step-d"></div><div class="step-d"></div><div class="step-d a"></div></div>
-  <p class="ttl">選擇守護神</p>
-  <p class="sub" id="guardian-sub">天賦整場只能使用一次</p>
-  <div class="guardian-grid" id="guardian-grid"></div>
-  <div class="guardian-detail" id="guardian-detail">
-    <p class="gd-skill" id="gd-skill"></p>
-    <p class="gd-desc" id="gd-desc"></p>
-  </div>
-  <div id="guardian-waiting" style="display:none;width:100%;background:rgba(255,255,255,.15);border-radius:var(--r2);padding:.75rem;text-align:center;margin-bottom:1rem;font-size:14px;color:rgba(255,255,255,.85);">已選擇，等待對方...</div>
-  <button class="btn pri" id="btn-guardian" onclick="confirmGuardian()" disabled>確認守護神</button>
-</div>
-
 <!-- S5: BLANK FILL -->
 <div id="s-deal" class="screen">
   <p class="logo">Heart<span> / </span>Cards</p>
@@ -632,7 +627,7 @@ let G={
 function goScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  const map={'s-login':'lobby','s-lobby':'lobby','s-odd-even':'lobby','s-guardian':'guardian','s-deal':'deal','s-hand':'battle','s-challenge':'battle','s-wait-challenge':'battle','s-pick':'battle','s-pre-punish':'lobby','s-result':null,'s-lb':'lobby'};
+  const map={'s-login':'lobby','s-lobby':'lobby','s-odd-even':'lobby','s-deal':'deal','s-hand':'battle','s-challenge':'battle','s-wait-challenge':'battle','s-pick':'battle','s-pre-punish':'lobby','s-result':null,'s-lb':'lobby'};
   if(map[id]!==undefined&&map[id]!==null)musicStart(map[id]);
 }
 
@@ -654,7 +649,6 @@ function handleEvent(ev){
   switch(ev.type){
     case 'lobby_update':     onLobbyUpdate(ev);        break;
     case 'coin_result':      onCoinResult(ev);         break;
-    case 'guardian':         onOppGuardian(ev);        break;
     case 'blanks_done':      onOppBlanksDone(ev);      break;
     case 'play_card':        onOppPlayCard(ev);        break;
     case 'challenge_result': onChallengeResult(ev);    break;
@@ -704,7 +698,8 @@ async function enterRoom(){
     document.getElementById('my-name-inp').value='';
     document.getElementById('my-name-section').style.display='block';
     document.getElementById('ready-section').style.display='none';
-    _mySlot=null; _isReady=false;
+    _mySlot=null; _isReady=false; _lobbyGuardianId=null;
+    buildLobbyGuardians();
     await renderLobby();
     goScreen('s-lobby');
     /* 3. WebSocket in background — non-blocking */
@@ -722,25 +717,58 @@ async function enterRoom(){
 }
 
 /* Step 2: Set nickname → claim slot */
+/* Build guardian mini-cards in lobby */
+function buildLobbyGuardians(){
+  const grid=document.getElementById('lobby-guardian-grid');
+  if(!grid)return;
+  grid.innerHTML='';
+  GUARDIANS.forEach(g=>{
+    const d=document.createElement('div');
+    d.id='lgc-'+g.id;
+    d.style.cssText='border:2px solid rgba(255,255,255,.3);border-radius:var(--r2);background:rgba(255,255,255,.15);padding:.5rem .25rem;cursor:pointer;text-align:center;transition:all .2s;';
+    d.innerHTML=`<div style="font-size:20px">${g.icon}</div><div style="font-size:10px;color:#fff;font-weight:500;margin-top:2px">${g.name}</div><div style="font-size:9px;color:rgba(255,255,255,.65)">${g.ele}系</div>`;
+    d.onclick=()=>selectLobbyGuardian(g.id);
+    grid.appendChild(d);
+  });
+}
+let _lobbyGuardianId=null;
+function selectLobbyGuardian(id){
+  _lobbyGuardianId=id;
+  document.querySelectorAll('[id^="lgc-"]').forEach(c=>{
+    c.style.borderColor='rgba(255,255,255,.3)';
+    c.style.background='rgba(255,255,255,.15)';
+  });
+  const sel=document.getElementById('lgc-'+id);
+  if(sel){sel.style.borderColor='#fff';sel.style.background='rgba(255,255,255,.35)';}
+  const g=GUARDIANS.find(x=>x.id===id);
+  const det=document.getElementById('lobby-guardian-detail');
+  det.style.display='block';
+  det.innerHTML=`<strong>${g.icon} ${g.name}・${g.skill}</strong><br>${g.desc}`;
+}
+
 async function setNickname(){
   const nm=document.getElementById('my-name-inp').value.trim();
   if(!nm){showToast('請填寫暱稱');return;}
-  showConnecting('儲存暱稱...');
+  if(!_lobbyGuardianId){showToast('請選擇守護神');return;}
+  showConnecting('儲存中...');
   try{
-    /* find empty slot */
     const rows=await dbSelect('hc_lobby','room_id=eq.'+G.roomId+'&select=slot,nickname');
     const taken=rows.map(r=>r.slot);
-    /* if already claimed this room by same name */
     const mine=rows.find(r=>r.nickname===nm);
     if(mine){_mySlot=mine.slot;}
     else if(!taken.includes('A')){_mySlot='A';}
     else if(!taken.includes('B')){_mySlot='B';}
     else{hideConnecting();showToast('房間已滿，請換一個房間號');return;}
     G.myName=nm;
-    await dbUpsert('hc_lobby',{room_id:G.roomId,slot:_mySlot,nickname:nm,ready:false,updated_at:new Date().toISOString()});
-    await sendEvent('lobby_update',{slot:_mySlot,nickname:nm,ready:false});
+    G.myGuardian=GUARDIANS.find(g=>g.id===_lobbyGuardianId);
+    G.myPlayer=_mySlot;
+    /* write guardian into hc_lobby as well so it's available later */
+    /* write guardian directly into hc_lobby — no game_state needed */
+    await dbUpsert('hc_lobby',{room_id:G.roomId,slot:_mySlot,nickname:nm,guardian:_lobbyGuardianId,ready:false,updated_at:new Date().toISOString()});
+    await sendEvent('lobby_update',{slot:_mySlot,nickname:nm,ready:false,guardian:_lobbyGuardianId});
     hideConnecting();
     document.getElementById('my-name-display').textContent=nm;
+    document.getElementById('my-guardian-display').textContent=G.myGuardian.icon+' '+G.myGuardian.name;
     document.getElementById('my-name-section').style.display='none';
     document.getElementById('ready-section').style.display='block';
     _isReady=false;
@@ -751,13 +779,18 @@ async function setNickname(){
   }catch(e){hideConnecting();showToast('儲存失敗，請重試');console.error(e);}
 }
 
-/* Step 3: Toggle ready */
+function resetLobbyChoice(){
+  document.getElementById('my-name-section').style.display='block';
+  document.getElementById('ready-section').style.display='none';
+  _isReady=false;_lobbyGuardianId=null;
+}
+
 async function toggleReady(){
   if(!_mySlot){showToast('請先填寫暱稱');return;}
   _isReady=!_isReady;
   try{
     await dbUpdate('hc_lobby','room_id=eq.'+G.roomId+'&slot=eq.'+_mySlot,{ready:_isReady,updated_at:new Date().toISOString()});
-    await sendEvent('lobby_update',{slot:_mySlot,nickname:G.myName,ready:_isReady});
+    await sendEvent('lobby_update',{slot:_mySlot,nickname:G.myName,ready:_isReady,guardian:_lobbyGuardianId});
     const btn=document.getElementById('btn-ready');
     if(_isReady){
       btn.textContent='取消同意';
@@ -773,10 +806,9 @@ async function toggleReady(){
   }catch(e){_isReady=!_isReady;showToast('操作失敗');console.error(e);}
 }
 
-/* Render lobby slots */
 async function renderLobby(){
   try{
-    const rows=await dbSelect('hc_lobby','room_id=eq.'+G.roomId+'&select=slot,nickname,ready&order=slot.asc');
+    const rows=await dbSelect('hc_lobby','room_id=eq.'+G.roomId+'&select=slot,nickname,ready,guardian&order=slot.asc');
     const slotMap={};
     rows.forEach(r=>{slotMap[r.slot]=r;});
     const wrap=document.getElementById('lobby-slots');
@@ -789,27 +821,32 @@ async function renderLobby(){
       div.className='lobby-slot'+(r?' filled':'')+(r?.ready?' is-ready':'');
       const icon=s==='A'?'👑':'💕';
       const name=r?r.nickname:'等待中...';
-      const status=r?(r.ready?'已同意開始':'已加入'):'尚未加入';
-      const readyBadge=r?.ready?'<span class="slot-ready-badge">✓ 同意開始</span>':'';
-      const meTag=isMe?'<span style="font-size:10px;color:rgba(255,255,255,.6);">（你）</span>':'';
+      const statusTxt=r?(r.ready?'已同意開始':'已加入'):'尚未加入';
+      const readyBadge=r?.ready?'<span class="slot-ready-badge">✓ 同意</span>':'';
+      const meTag=isMe?'<span style="font-size:10px;opacity:.6">（你）</span>':'';
       div.innerHTML=`<div class="slot-icon">${icon}</div>
-        <div class="slot-name">${name} ${meTag}</div>
-        <div class="slot-status">${status}</div>
-        ${readyBadge}`;
+        <div class="slot-name">${name}${meTag}</div>
+        <div class="slot-status">${statusTxt}</div>${readyBadge}`;
       wrap.appendChild(div);
     });
-    /* check both ready → start */
+    /* both ready → read guardian directly from hc_lobby */
     if(slotMap.A&&slotMap.B&&slotMap.A.ready&&slotMap.B.ready){
       clearInterval(_lobbyPoll);
       G.myPlayer=_mySlot;
       const oppSlot=_mySlot==='A'?'B':'A';
       G.oppName=slotMap[oppSlot]?.nickname||'對方';
+      /* guardian from lobby row */
+      if(slotMap[_mySlot]?.guardian){
+        G.myGuardian=GUARDIANS.find(g=>g.id===slotMap[_mySlot].guardian)||G.myGuardian;
+      }
+      if(slotMap[oppSlot]?.guardian){
+        G.oppGuardian=GUARDIANS.find(g=>g.id===slotMap[oppSlot].guardian);
+      }
       setTimeout(()=>startOddEven(),600);
     }
   }catch(e){console.error('renderLobby error',e);}
 }
 
-/* Handle lobby_update from opponent */
 function onLobbyUpdate(ev){
   renderLobby();
   if(ev.nickname&&ev.slot!==_mySlot){
@@ -909,7 +946,20 @@ function _showCoinResult(result){
   document.getElementById('coin-result-sub').textContent=iFirst?'你先出牌，掌握主動！':'你是後手，伺機反擊！';
   document.getElementById('coin-hint').textContent='';
   showToast(iFirst?'你是先手！':'你是後手');
-  setTimeout(()=>{buildGuardian();goScreen('s-guardian');},2200);
+  setTimeout(async()=>{
+    /* load guardian from lobby if not already set */
+    if(!G.myGuardian){
+      try{
+        const rows=await dbSelect('hc_lobby','room_id=eq.'+G.roomId+'&select=slot,guardian');
+        const oppSlot=G.myPlayer==='A'?'B':'A';
+        rows.forEach(r=>{
+          if(r.slot===G.myPlayer&&r.guardian) G.myGuardian=GUARDIANS.find(g=>g.id===r.guardian)||G.myGuardian;
+          if(r.slot===oppSlot&&r.guardian) G.oppGuardian=GUARDIANS.find(g=>g.id===r.guardian);
+        });
+      }catch(e){}
+    }
+    startDealPhase();
+  },2200);
 }
 
 function onCoinResult(ev){
@@ -928,82 +978,6 @@ async function _pollCoin(){
       _animateCoin(st.coin);
     }
   }catch(e){}
-}
-
-/* ══════════════════════════════════════
-   GUARDIAN
-══════════════════════════════════════ */
-let _oppGuardianDone=false;
-function buildGuardian(){
-  _oppGuardianDone=false;
-  clearInterval(_guardianPoller);
-  document.getElementById('guardian-waiting').style.display='none';
-  document.getElementById('btn-guardian').disabled=true;
-  /* 進入時先讀DB，對方可能已先選好 */
-  readState().then(st=>{
-    const oppSlot=G.myPlayer==='A'?'B':'A';
-    if(st.guardian?.[oppSlot]) _oppGuardianDone=true;
-  }).catch(()=>{});
-  const grid=document.getElementById('guardian-grid');
-  grid.innerHTML='';
-  GUARDIANS.forEach((g,i)=>{
-    const d=document.createElement('div');d.className='g-card';d.id='gc-'+g.id;
-    d.style.animation=`fadeIn .4s ${i*.07}s both ease`;
-    d.innerHTML=`<div class="g-icon">${g.icon}</div><div class="g-name">${g.name}</div><div class="g-ele">${g.ele}系</div><div class="g-skill">${g.skill}</div><div class="g-check">✓</div>`;
-    d.onclick=()=>selectGuardian(g.id);
-    grid.appendChild(d);
-  });
-  /* 進入畫面就開始輪詢對方，不等自己確認 */
-  clearInterval(_guardianPoller);
-  _guardianPoller=setInterval(_pollGuardian,1500);
-}
-function selectGuardian(id){
-  G.myGuardian=GUARDIANS.find(g=>g.id===id);
-  document.querySelectorAll('.g-card').forEach(c=>c.classList.remove('sel'));
-  document.getElementById('gc-'+id).classList.add('sel');
-  document.getElementById('btn-guardian').disabled=false;
-  const det=document.getElementById('guardian-detail');
-  det.style.display='block';
-  document.getElementById('gd-skill').textContent='天賦：'+G.myGuardian.skill;
-  document.getElementById('gd-desc').textContent=G.myGuardian.desc;
-}
-let _guardianPoller=null;
-async function confirmGuardian(){
-  document.getElementById('guardian-waiting').style.display='block';
-  document.getElementById('btn-guardian').disabled=true;
-  sendEvent('guardian',{guardian:G.myGuardian.id});
-  /* 寫入巢狀 {guardian:{A:'fire'}} 格式 */
-  await mergeState({guardian:{[G.myPlayer]:G.myGuardian.id}}).catch(()=>{});
-  /* 立即讀DB看對方是否已確認 */
-  const st=await readState().catch(()=>({}));
-  const oppSlot=G.myPlayer==='A'?'B':'A';
-  if(st.guardian?.[oppSlot]){
-    _oppGuardianDone=true;
-    clearInterval(_guardianPoller);
-    startDealPhase();
-    return;
-  }
-  clearInterval(_guardianPoller);
-  _guardianPoller=setInterval(_pollGuardian,1500);
-}
-async function _pollGuardian(){
-  if(_oppGuardianDone){clearInterval(_guardianPoller);return;}
-  try{
-    const st=await readState();
-    const oppSlot=G.myPlayer==='A'?'B':'A';
-    if(st.guardian?.[oppSlot]){
-      _oppGuardianDone=true;clearInterval(_guardianPoller);
-      showToast(G.oppName+' 已選好守護神');
-      startDealPhase();
-    }
-  }catch(e){}
-}
-function onOppGuardian(ev){
-  if(_oppGuardianDone)return;
-  _oppGuardianDone=true;
-  clearInterval(_guardianPoller);
-  showToast(G.oppName+' 已選好守護神');
-  if(document.getElementById('guardian-waiting').style.display==='block')startDealPhase();
 }
 
 /* ══════════════════════════════════════
@@ -1523,8 +1497,8 @@ function playAgain(){
   G.myGuardian=null;G.talentUsed=false;G.selectedCard=null;G.round=1;
   G.myVault=[];G.oppVault=[];G.chosenOE='';G.punishA='';G.punishB='';
   _coinFlipped=false;clearInterval(_coinPoller);
-  _oppGuardianDone=false;_oppBlanksDone=false;_oppRoundDone=false;_oppPunish=null;
-  clearInterval(_guardianPoller);clearInterval(_blanksPoller);
+  _oppBlanksDone=false;_oppRoundDone=false;_oppPunish=null;
+  clearInterval(_blanksPoller);
   G.deck=makeDeck();
   startOddEven();
 }
