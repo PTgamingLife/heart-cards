@@ -1061,7 +1061,7 @@ async function _pollBlanks(){
   try{
     const st=await readState();
     const oppSlot=G.myPlayer==='A'?'B':'A';
-    const oppTasks=st['blanks_'+oppSlot];
+    const oppTasks=st.blanks?.[oppSlot];
     if(oppTasks){
       _oppBlanksDone=true;clearInterval(_blanksPoller);
       oppTasks.forEach(t=>{
@@ -1110,23 +1110,20 @@ async function _pollBattle(){
   try{
     const st=await readState();
     const oppSlot=G.myPlayer==='A'?'B':'A';
-    /* Check if opponent played a card we haven't seen */
-    const playKey='play_r'+G.round;
-    const chalKey='chal_r'+G.round;
-    if(st[playKey]&&st[playKey].startsWith(oppSlot+'|')){
-      const cardData=JSON.parse(st[playKey].slice(oppSlot.length+1));
+    /* Check if opponent played a card (st.play.slot===opp and round matches) */
+    if(st.play?.slot===oppSlot && st.play?.round===G.round){
       const cur=document.getElementById('s-hand');
       if(cur&&cur.classList.contains('active')){
         clearInterval(_battlePoller);
-        onOppPlayCard({card:cardData});
+        onOppPlayCard({card:st.play.card});
       }
     }
-    if(st[chalKey]&&st[chalKey].startsWith(oppSlot+'|')){
-      const success=st[chalKey].endsWith('true');
+    /* Check challenge result from opponent */
+    if(st.challenge?.slot===oppSlot && st.challenge?.round===G.round){
       const cur=document.getElementById('s-wait-challenge');
       if(cur&&cur.classList.contains('active')){
         clearInterval(_battlePoller);
-        onChallengeResult({success,round:G.round});
+        onChallengeResult({success:st.challenge.success,round:G.round});
       }
     }
   }catch(e){}
