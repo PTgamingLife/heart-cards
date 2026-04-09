@@ -394,23 +394,6 @@ html,body{height:100%;color:#4A0020;font-family:'Noto Sans TC',sans-serif;overfl
 </div>
 
 <!-- S4: GUARDIAN -->
-<!-- S5: BLANK FILL -->
-<div id="s-deal" class="screen">
-  <p class="logo">Heart<span> / </span>Cards</p>
-  <p class="ttl">空白任務卡</p>
-  <p class="sub">你收到 2 張空白牌，請填寫任務</p>
-  <div class="blank-row" id="blank-cards"></div>
-  <div class="fill-area" id="fill-area" style="display:none;">
-    <p class="fill-title" id="fill-area-title">填寫任務</p>
-    <input class="inp" id="blank-title" placeholder="任務標題" maxlength="12">
-    <input class="inp" id="blank-content" placeholder="任務具體內容" maxlength="50">
-    <button class="btn pri btn-sm" onclick="saveBlank()">儲存</button>
-  </div>
-  <p style="font-size:13px;color:rgba(255,255,255,.85);margin-bottom:1rem;" id="blank-status">尚未填寫 0 / 2</p>
-  <div id="deal-waiting" style="display:none;width:100%;background:rgba(255,255,255,.15);border-radius:var(--r2);padding:.75rem;text-align:center;margin-bottom:1rem;font-size:14px;color:rgba(255,255,255,.85);">已填寫，等待對方...</div>
-  <button class="btn pri" id="btn-deal" onclick="submitBlankCards()" disabled>填寫完成</button>
-</div>
-
 <!-- S6: HAND (BATTLE) -->
 <div id="s-hand" class="screen">
   <p class="logo">Heart<span> / </span>Cards</p>
@@ -627,7 +610,7 @@ let G={
 function goScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  const map={'s-login':'lobby','s-lobby':'lobby','s-odd-even':'lobby','s-deal':'deal','s-hand':'battle','s-challenge':'battle','s-wait-challenge':'battle','s-pick':'battle','s-pre-punish':'lobby','s-result':null,'s-lb':'lobby'};
+  const map={'s-login':'lobby','s-lobby':'lobby','s-odd-even':'lobby','s-hand':'battle','s-challenge':'battle','s-wait-challenge':'battle','s-pick':'battle','s-pre-punish':'lobby','s-result':null,'s-lb':'lobby'};
   if(map[id]!==undefined&&map[id]!==null)musicStart(map[id]);
 }
 
@@ -649,7 +632,6 @@ function handleEvent(ev){
   switch(ev.type){
     case 'lobby_update':     onLobbyUpdate(ev);        break;
     case 'coin_result':      onCoinResult(ev);         break;
-    case 'blanks_done':      onOppBlanksDone(ev);      break;
     case 'play_card':        onOppPlayCard(ev);        break;
     case 'challenge_result': onChallengeResult(ev);    break;
     case 'vault_pick':       onOppVaultPick(ev);       break;
@@ -875,8 +857,7 @@ function makeDeck(seed){
   // deterministic shuffle with seeded LCG if seed given
   let rand=seed?lcgRand(seed):Math.random.bind(Math);
   for(let i=deck.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]];}
-  const bi=[];while(bi.length<4){const r=Math.floor(rand()*52);if(!bi.includes(r))bi.push(r);}
-  bi.forEach(i=>{deck[i].blank=true;deck[i].task=['待填寫','點擊填寫任務內容'];deck[i].customFilled=false;});
+  /* all 52 cards have real tasks — no blanks */
   return deck;
 }
 function lcgRand(seed){let s=seed;return()=>{s=(1664525*s+1013904223)%4294967296;return s/4294967296;};}
@@ -958,7 +939,7 @@ function _showCoinResult(result){
         });
       }catch(e){}
     }
-    startDealPhase();
+    startBattle();
   },2200);
 }
 
@@ -978,111 +959,6 @@ async function _pollCoin(){
       _animateCoin(st.coin);
     }
   }catch(e){}
-}
-
-/* ══════════════════════════════════════
-   BLANK CARDS
-══════════════════════════════════════ */
-let _oppBlanksDone=false;
-function startDealPhase(){
-  _oppBlanksDone=false;
-  G.blankCards=G.deck.filter(c=>c.blank).slice(0,2);
-  G.blankFilled=0;G.selectedBlank=null;
-  renderBlanks();
-  document.getElementById('fill-area').style.display='none';
-  document.getElementById('blank-status').textContent='尚未填寫 0 / 2';
-  document.getElementById('deal-waiting').style.display='none';
-  document.getElementById('btn-deal').disabled=true;
-  goScreen('s-deal');
-  /* 進入畫面就開始輪詢對方填寫狀態 */
-  clearInterval(_blanksPoller);
-  _blanksPoller=setInterval(_pollBlanks,1500);
-}
-function renderBlanks(){
-  const wrap=document.getElementById('blank-cards');wrap.innerHTML='';
-  G.blankCards.forEach((c,i)=>{
-    const d=document.createElement('div');
-    d.className='card blank-card';
-    d.style.animation=`dealCard .5s ${i*.15}s both cubic-bezier(.34,1.2,.64,1)`;
-    d.style.setProperty('--dx',(i===0?'-20px':'20px'));
-    d.style.setProperty('--rot',(i===0?'-5deg':'5deg'));
-    const sc=RED_SUITS.includes(c.suit)?'red':'black';
-    d.innerHTML=`<div class="c-suit ${sc}">${c.suit}</div><div class="c-val">${c.val}</div><div class="c-task" style="color:${c.customFilled?'#B5194A':'#8D1A45'}">${c.customFilled?c.task[0]:'點擊填寫'}</div>`;
-    if(!c.customFilled)d.onclick=()=>openFill(i);
-    wrap.appendChild(d);
-  });
-}
-function openFill(idx){
-  G.selectedBlank=idx;
-  document.getElementById('fill-area').style.display='block';
-  document.getElementById('fill-area-title').textContent='填寫第'+(idx+1)+'張空白任務';
-  document.getElementById('blank-title').value='';
-  document.getElementById('blank-content').value='';
-  document.getElementById('blank-title').focus();
-}
-function saveBlank(){
-  const t=document.getElementById('blank-title').value.trim();
-  const c=document.getElementById('blank-content').value.trim();
-  if(!t||!c){showToast('請填寫標題與內容');return;}
-  G.blankCards[G.selectedBlank].task=[t,c];
-  G.blankCards[G.selectedBlank].customFilled=true;
-  G.blankFilled++;
-  renderBlanks();
-  document.getElementById('fill-area').style.display='none';
-  document.getElementById('blank-status').textContent='已填寫 '+G.blankFilled+' / 2';
-  if(G.blankFilled>=2)document.getElementById('btn-deal').disabled=false;
-}
-let _blanksPoller=null;
-async function submitBlankCards(){
-  document.getElementById('deal-waiting').style.display='block';
-  document.getElementById('btn-deal').disabled=true;
-  const tasks=G.blankCards.map(c=>({suit:c.suit,val:c.val,task:c.task}));
-  sendEvent('blanks_done',{tasks});
-  await mergeState({blanks:{[G.myPlayer]:tasks}}).catch(()=>{});
-  /* 立即讀DB看對方是否已確認 */
-  const st=await readState().catch(()=>({}));
-  const oppSlot=G.myPlayer==='A'?'B':'A';
-  const oppTasksNow=st.blanks?.[oppSlot];
-  if(oppTasksNow){
-    _oppBlanksDone=true;
-    clearInterval(_blanksPoller);
-    oppTasksNow.forEach(t=>{
-      const card=G.deck.find(card=>card.suit===t.suit&&card.val===t.val);
-      if(card){card.task=t.task;card.customFilled=true;}
-    });
-    startBattle();
-    return;
-  }
-  clearInterval(_blanksPoller);
-  _blanksPoller=setInterval(_pollBlanks,1500);
-}
-async function _pollBlanks(){
-  if(_oppBlanksDone){clearInterval(_blanksPoller);return;}
-  try{
-    const st=await readState();
-    const oppSlot=G.myPlayer==='A'?'B':'A';
-    const oppTasks=st.blanks?.[oppSlot];
-    if(oppTasks){
-      _oppBlanksDone=true;clearInterval(_blanksPoller);
-      oppTasks.forEach(t=>{
-        const card=G.deck.find(card=>card.suit===t.suit&&card.val===t.val);
-        if(card){card.task=t.task;card.customFilled=true;}
-      });
-      showToast(G.oppName+' 已填好任務卡');
-      startBattle();
-    }
-  }catch(e){}
-}
-function onOppBlanksDone(ev){
-  if(_oppBlanksDone)return;
-  _oppBlanksDone=true;
-  clearInterval(_blanksPoller);
-  ev.tasks.forEach(t=>{
-    const card=G.deck.find(card=>card.suit===t.suit&&card.val===t.val);
-    if(card){card.task=t.task;card.customFilled=true;}
-  });
-  showToast(G.oppName+' 已填好任務卡');
-  if(document.getElementById('deal-waiting').style.display==='block')startBattle();
 }
 
 /* ══════════════════════════════════════
@@ -1494,8 +1370,8 @@ function playAgain(){
   G.myGuardian=null;G.talentUsed=false;G.selectedCard=null;G.round=1;
   G.myVault=[];G.oppVault=[];G.chosenOE='';G.punishA='';G.punishB='';
   _coinFlipped=false;clearInterval(_coinPoller);
-  _oppBlanksDone=false;_oppRoundDone=false;_oppPunish=null;
-  clearInterval(_blanksPoller);
+  _oppRoundDone=false;_oppPunish=null;
+
   G.deck=makeDeck();
   startOddEven();
 }
